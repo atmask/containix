@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 180" role="img" aria-labelledby="title desc">
+  <title id="title">containix</title>
+  <desc id="desc">A Kubernetes-style heptagon with a Nix lambda inside, next to the wordmark "containix".</desc>
+  <style>
+    .ink { fill: #0f1a1d; }
+    .heptagon-fill { fill: #326CE5; }
+    .heptagon-border { fill: none; stroke: #ffffff; stroke-width: 4; stroke-linejoin: round; }
+    .lambda { fill: #ffffff; }
+    @media (prefers-color-scheme: dark) {
+      .ink { fill: #e8eaed; }
+    }
+  </style>
+
+  <!-- K8s-style heptagon with λ -->
+  <g transform="translate(10, 2)">
+    <!-- Shadow -->
+    <polygon
+      points="78,11 133,37 147,96 109,144 47,144 9,96 23,37"
+      fill="rgba(0,0,0,0.15)"
+      transform="translate(2,3)"
+    />
+    <!-- Heptagon fill -->
+    <polygon
+      points="78,11 133,37 147,96 109,144 47,144 9,96 23,37"
+      class="heptagon-fill"
+    />
+    <!-- White border -->
+    <polygon
+      points="78,11 133,37 147,96 109,144 47,144 9,96 23,37"
+      class="heptagon-border"
+    />
+    <!-- Lambda -->
+    <text x="78" y="112"
+          font-family="Georgia, 'Times New Roman', serif"
+          font-size="100"
+          font-weight="700"
+          text-anchor="middle"
+          class="lambda">λ</text>
+  </g>
+
+  <!-- Wordmark -->
+  <g transform="translate(186,122)">
+    <text x="0" y="0"
+          font-family="ui-rounded, 'SF Pro Rounded', Nunito, Inter, system-ui, -apple-system, Segoe UI, Arial, sans-serif"
+          font-size="86"
+          font-weight="800"
+          letter-spacing="-2"><tspan class="ink">contai</tspan><tspan fill="#326CE5">nix</tspan></text>
+  </g>
+</svg>
