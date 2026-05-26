@@ -240,13 +240,31 @@ func PrepareRootfs(bundlePath string, cfg *ContainixConfig, storePaths []string)
 
 ## Step 4: Wire it into the shim's Create method
 
-Update the `Create` method from Tutorial 1:
+Update the `Create` method on the `Service` wrapper from Tutorial 1. Remember the wrapping pattern: `Service` embeds `taskAPI.TTRPCTaskService`, so forwarding is `s.TTRPCTaskService.Create(...)`.
 
 ```go
+// pkg/shimservice/service.go
+package shimservice
+
+import (
+	"context"
+	"fmt"
+	"log"
+
+	taskAPI "github.com/containerd/containerd/api/runtime/task/v3"
+
+	"github.com/atmask/containix/pkg/nix"
+)
+
+type Service struct {
+	taskAPI.TTRPCTaskService
+}
+
 func (s *Service) Create(ctx context.Context, req *taskAPI.CreateTaskRequest) (*taskAPI.CreateTaskResponse, error) {
 	log.Printf("[containix] Create called: id=%s bundle=%s", req.ID, req.Bundle)
 
-	// Check for containix annotations
+	// Read annotations. Returns nil if this isn't a containix container,
+	// or if it's the pod sandbox (container-type=sandbox) — both pass through.
 	cfg, err := nix.FromBundle(req.Bundle)
 	if err != nil {
 		log.Printf("[containix] error reading annotations: %v", err)
@@ -256,27 +274,66 @@ func (s *Service) Create(ctx context.Context, req *taskAPI.CreateTaskRequest) (*
 	if cfg != nil {
 		log.Printf("[containix] Nix flake detected: %s", cfg.FlakeRef)
 
-		// Resolve the flake to a store path
 		storePath, err := nix.Build(cfg.FlakeRef)
 		if err != nil {
 			return nil, fmt.Errorf("nix build: %w", err)
 		}
 		log.Printf("[containix] store path: %s", storePath)
 
-		// Get the full closure
 		closure, err := nix.Closure(storePath)
 		if err != nil {
 			return nil, fmt.Errorf("nix closure: %w", err)
 		}
 		log.Printf("[containix] closure: %d paths", len(closure))
 
-		// Prepare the rootfs with Nix store mounts
 		if err := nix.PrepareRootfs(req.Bundle, cfg, closure); err != nil {
 			return nil, fmt.Errorf("preparing rootfs: %w", err)
 		}
 	}
 
-	return s.inner.Create(ctx, req)
+	return s.TTRPCTaskService.Create(ctx, req)
+}
+```
+
+### Branching on container-type
+
+`Create` will be called multiple times per pod: once for the **sandbox container** (which runs the upstream `pause` binary and just holds the pod's shared namespaces), then once per **app container**. Only app containers should trigger Nix logic.
+
+Update `pkg/nix/annotations.go` to filter on container-type:
+
+```go
+const (
+	AnnotationFlake         = "containix.dev/flake"
+	AnnotationEntrypoint    = "containix.dev/entrypoint"
+	AnnotationContainerType = "io.kubernetes.cri.container-type"  // injected by CRI
+)
+
+func FromBundle(bundlePath string) (*ContainixConfig, error) {
+	specPath := filepath.Join(bundlePath, "config.json")
+	data, err := os.ReadFile(specPath)
+	if err != nil {
+		return nil, fmt.Errorf("reading OCI spec: %w", err)
+	}
+
+	var spec ocispec.Spec
+	if err := json.Unmarshal(data, &spec); err != nil {
+		return nil, fmt.Errorf("parsing OCI spec: %w", err)
+	}
+
+	// Skip sandbox containers — they need the upstream pause image, not Nix.
+	if spec.Annotations[AnnotationContainerType] == "sandbox" {
+		return nil, nil
+	}
+
+	flakeRef, ok := spec.Annotations[AnnotationFlake]
+	if !ok {
+		return nil, nil // not a containix container, passthrough
+	}
+
+	return &ContainixConfig{
+		FlakeRef:   flakeRef,
+		Entrypoint: spec.Annotations[AnnotationEntrypoint],
+	}, nil
 }
 ```
 

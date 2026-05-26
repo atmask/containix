@@ -1,0 +1,275 @@
+{
+  "lockfile-version": 1,
+  "manifest": {
+    "version": 1,
+    "install": {
+      "go": {
+        "pkg-path": "go",
+        "version": "1.26.2"
+      },
+      "just": {
+        "pkg-path": "just"
+      }
+    },
+    "hook": {},
+    "profile": {},
+    "options": {}
+  },
+  "packages": [
+    {
+      "attr_path": "go",
+      "broken": false,
+      "derivation": "/nix/store/97qfa61h35q0nqppixvxknsq6wj612gv-go-1.26.2.drv",
+      "description": "Go Programming language",
+      "install_id": "go",
+      "license": "BSD-3-Clause",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=d233902339c02a9c334e7e593de68855ad26c4cb",
+      "name": "go-1.26.2",
+      "pname": "go",
+      "rev": "d233902339c02a9c334e7e593de68855ad26c4cb",
+      "rev_count": 998534,
+      "rev_date": "2026-05-15T18:21:44Z",
+      "scrape_date": "2026-05-17T07:05:51.912929Z",
+      "stabilities": [
+        "unstable",
+        "staging"
+      ],
+      "unfree": false,
+      "version": "1.26.2",
+      "outputs_to_install": [
+        "out",
+        "out",
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/fkzywh7rg8lg1n2p0r161iqjwhz540wx-go-1.26.2"
+      },
+      "system": "aarch64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "go",
+      "broken": false,
+      "derivation": "/nix/store/79wmlk24kqdnxmpj5l833ib2fsxpwca0-go-1.26.2.drv",
+      "description": "Go Programming language",
+      "install_id": "go",
+      "license": "BSD-3-Clause",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=d233902339c02a9c334e7e593de68855ad26c4cb",
+      "name": "go-1.26.2",
+      "pname": "go",
+      "rev": "d233902339c02a9c334e7e593de68855ad26c4cb",
+      "rev_count": 998534,
+      "rev_date": "2026-05-15T18:21:44Z",
+      "scrape_date": "2026-05-17T07:33:31.269344Z",
+      "stabilities": [
+        "unstable",
+        "staging"
+      ],
+      "unfree": false,
+      "version": "1.26.2",
+      "outputs_to_install": [
+        "out",
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/w4i7p78y3735jcy69sk4lcy9zyxr0cav-go-1.26.2"
+      },
+      "system": "aarch64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "go",
+      "broken": false,
+      "derivation": "/nix/store/7f579nxnclv9nql5z2d5g2qyv7zfdl16-go-1.26.2.drv",
+      "description": "Go Programming language",
+      "install_id": "go",
+      "license": "BSD-3-Clause",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=d233902339c02a9c334e7e593de68855ad26c4cb",
+      "name": "go-1.26.2",
+      "pname": "go",
+      "rev": "d233902339c02a9c334e7e593de68855ad26c4cb",
+      "rev_count": 998534,
+      "rev_date": "2026-05-15T18:21:44Z",
+      "scrape_date": "2026-05-17T08:01:18.426517Z",
+      "stabilities": [
+        "unstable",
+        "staging"
+      ],
+      "unfree": false,
+      "version": "1.26.2",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/g0b45l45nlb1kqiywzja7fh49yn7lla5-go-1.26.2"
+      },
+      "system": "x86_64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "go",
+      "broken": false,
+      "derivation": "/nix/store/5a501r66jxszbpw9af1q1a5z3rnrcmfs-go-1.26.2.drv",
+      "description": "Go Programming language",
+      "install_id": "go",
+      "license": "BSD-3-Clause",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=d233902339c02a9c334e7e593de68855ad26c4cb",
+      "name": "go-1.26.2",
+      "pname": "go",
+      "rev": "d233902339c02a9c334e7e593de68855ad26c4cb",
+      "rev_count": 998534,
+      "rev_date": "2026-05-15T18:21:44Z",
+      "scrape_date": "2026-05-17T08:32:11.746565Z",
+      "stabilities": [
+        "unstable",
+        "staging"
+      ],
+      "unfree": false,
+      "version": "1.26.2",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/dimnagks1qsp7180yw74z0npp7z2ihs3-go-1.26.2"
+      },
+      "system": "x86_64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "just",
+      "broken": false,
+      "derivation": "/nix/store/r2mvsn3dg1rf7sxcj2ki0caj5jq262dj-just-1.51.0.drv",
+      "description": "Handy way to save and run project-specific commands",
+      "install_id": "just",
+      "license": "CC0-1.0",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=d233902339c02a9c334e7e593de68855ad26c4cb",
+      "name": "just-1.51.0",
+      "pname": "just",
+      "rev": "d233902339c02a9c334e7e593de68855ad26c4cb",
+      "rev_count": 998534,
+      "rev_date": "2026-05-15T18:21:44Z",
+      "scrape_date": "2026-05-17T07:06:07.835943Z",
+      "stabilities": [
+        "unstable",
+        "staging"
+      ],
+      "unfree": false,
+      "version": "1.51.0",
+      "outputs_to_install": [
+        "man",
+        "out"
+      ],
+      "outputs": {
+        "doc": "/nix/store/c8jdzd2s7hbldm1q1glrjisavxy1vf54-just-1.51.0-doc",
+        "man": "/nix/store/lxfs1naxd1a3934y9xsd1kid5yyw7jbn-just-1.51.0-man",
+        "out": "/nix/store/c9vv24f9bdnhnms10nwijn6q8wjz00ak-just-1.51.0"
+      },
+      "system": "aarch64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "just",
+      "broken": false,
+      "derivation": "/nix/store/6ddmy3sfc4d362ykl1bzc7kzshp9m3j3-just-1.51.0.drv",
+      "description": "Handy way to save and run project-specific commands",
+      "install_id": "just",
+      "license": "CC0-1.0",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=d233902339c02a9c334e7e593de68855ad26c4cb",
+      "name": "just-1.51.0",
+      "pname": "just",
+      "rev": "d233902339c02a9c334e7e593de68855ad26c4cb",
+      "rev_count": 998534,
+      "rev_date": "2026-05-15T18:21:44Z",
+      "scrape_date": "2026-05-17T07:33:50.814157Z",
+      "stabilities": [
+        "unstable",
+        "staging"
+      ],
+      "unfree": false,
+      "version": "1.51.0",
+      "outputs_to_install": [
+        "man",
+        "out"
+      ],
+      "outputs": {
+        "doc": "/nix/store/q80cv2gjn2q640fvsqgdj6ap2iihxwg9-just-1.51.0-doc",
+        "man": "/nix/store/5m9rgkzibz19za2nmn83y9l5gsy2z1yh-just-1.51.0-man",
+        "out": "/nix/store/ljwadwqsib4zd6nvg6xi5rnzah9ad2q4-just-1.51.0"
+      },
+      "system": "aarch64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "just",
+      "broken": false,
+      "derivation": "/nix/store/2y7mc8nzl0ri32frfkca18593pzp318k-just-1.51.0.drv",
+      "description": "Handy way to save and run project-specific commands",
+      "install_id": "just",
+      "license": "CC0-1.0",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=d233902339c02a9c334e7e593de68855ad26c4cb",
+      "name": "just-1.51.0",
+      "pname": "just",
+      "rev": "d233902339c02a9c334e7e593de68855ad26c4cb",
+      "rev_count": 998534,
+      "rev_date": "2026-05-15T18:21:44Z",
+      "scrape_date": "2026-05-17T08:01:34.925203Z",
+      "stabilities": [
+        "unstable",
+        "staging"
+      ],
+      "unfree": false,
+      "version": "1.51.0",
+      "outputs_to_install": [
+        "man",
+        "out"
+      ],
+      "outputs": {
+        "doc": "/nix/store/p8pb01d5w82lf8z0ah4kcc6ziwfvxfkr-just-1.51.0-doc",
+        "man": "/nix/store/97jyxj8d9d4qjq25681ng88jnbdak1dx-just-1.51.0-man",
+        "out": "/nix/store/w0capgph40qykn19a9ghv38fjf06gg97-just-1.51.0"
+      },
+      "system": "x86_64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "just",
+      "broken": false,
+      "derivation": "/nix/store/hkyjx4spky86b1j8vf9x9817s30zm7x3-just-1.51.0.drv",
+      "description": "Handy way to save and run project-specific commands",
+      "install_id": "just",
+      "license": "CC0-1.0",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=d233902339c02a9c334e7e593de68855ad26c4cb",
+      "name": "just-1.51.0",
+      "pname": "just",
+      "rev": "d233902339c02a9c334e7e593de68855ad26c4cb",
+      "rev_count": 998534,
+      "rev_date": "2026-05-15T18:21:44Z",
+      "scrape_date": "2026-05-17T08:32:32.613932Z",
+      "stabilities": [
+        "unstable",
+        "staging"
+      ],
+      "unfree": false,
+      "version": "1.51.0",
+      "outputs_to_install": [
+        "man",
+        "out"
+      ],
+      "outputs": {
+        "doc": "/nix/store/mkdym7bscwpn6y6dvzrblm5p87q9c2g0-just-1.51.0-doc",
+        "man": "/nix/store/mgc1wdhgkc9246s9a52j17ymw4745bal-just-1.51.0-man",
+        "out": "/nix/store/zn7n9xnw5vx6cqf1az8b8p1pfsmrl9vw-just-1.51.0"
+      },
+      "system": "x86_64-linux",
+      "group": "toplevel",
+      "priority": 5
+    }
+  ]
+}

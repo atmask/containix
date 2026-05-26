@@ -30,7 +30,15 @@ curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix 
 # Copy the shim binary
 sudo cp containerd-shim-containix-v1 /usr/local/bin/
 
-# Configure containerd
+# Label the node
+kubectl label node <node-name> containix.dev/runtime=true
+```
+
+### Configure containerd — standard distribution
+
+Append to `/etc/containerd/config.toml`:
+
+```bash
 sudo tee -a /etc/containerd/config.toml <<EOF
 
 [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.containix]
@@ -39,14 +47,41 @@ sudo tee -a /etc/containerd/config.toml <<EOF
     SystemdCgroup = true
 EOF
 
-# Restart containerd
 sudo systemctl restart containerd
-
-# Label the node
-kubectl label node <node-name> containix.dev/runtime=true
 ```
 
-For EKS, bake these into a custom AMI or user data script for the node group.
+### Configure containerd — k3s
+
+k3s regenerates its containerd config (`/var/lib/rancher/k3s/agent/etc/containerd/config.toml`) on every start, so direct edits get overwritten. Use the template extension:
+
+```bash
+# Seed the template from the current rendered config the first time
+sudo cp /var/lib/rancher/k3s/agent/etc/containerd/config.toml \
+        /var/lib/rancher/k3s/agent/etc/containerd/config.toml.tmpl
+
+# Append the containix runtime block
+sudo tee -a /var/lib/rancher/k3s/agent/etc/containerd/config.toml.tmpl <<'EOF'
+
+[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.containix]
+  runtime_type = "io.containerd.containix.v1"
+  [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.containix.options]
+    SystemdCgroup = true
+EOF
+
+sudo systemctl restart k3s
+```
+
+After restart, verify:
+
+```bash
+grep -A 3 containix /var/lib/rancher/k3s/agent/etc/containerd/config.toml
+```
+
+The block should be present in the rendered file.
+
+### EKS / GKE / managed Kubernetes
+
+Bake the shim binary, Nix installation, and config changes into a custom AMI or `cloud-init` script for the dedicated node group. See the EKS-specific notes below.
 
 ## Step 2: Create the RuntimeClass
 

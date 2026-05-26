@@ -171,7 +171,7 @@ func (s *Service) Create(ctx context.Context, req *taskAPI.CreateTaskRequest) (*
 			cfg.FlakeRef, len(closure), buildDuration.Milliseconds())
 	}
 
-	return s.inner.Create(ctx, req)
+	return s.TTRPCTaskService.Create(ctx, req)
 }
 ```
 
