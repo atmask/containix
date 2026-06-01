@@ -12,10 +12,15 @@ install: build
   sudo install -m 755 bin/containerd-shim-containix-v1 /var/lib/containix/bin/
   sudo systemctl restart containerd
 
+# Pull the stub image once. `ctr` (unlike docker) does not auto-pull on run.
+# Cheap to re-run; ctr skips work if the image is already present.
+pull:
+  sudo ctr image pull docker.io/library/alpine:latest
+
 # Quick smoke test: install + run a one-shot container via the containix runtime.
 # Check `sudo journalctl -u containerd -f | grep containix` to see the shim
 # Create handler fire.
-test: install
+test: install pull
   sudo ctr run --rm \
     --runtime io.containerd.containix.v1 \
     docker.io/library/alpine:latest containix-smoke-test \
