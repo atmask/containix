@@ -12,7 +12,7 @@ import (
 )
 
 func main() {
-	shim.RunShim(
+	shim.Run(
 		context.Background(),
 		manager.NewShimManager("io.containerd.containix.v1"),
 	)
