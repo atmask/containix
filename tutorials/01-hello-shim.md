@@ -12,9 +12,40 @@ A working shim binary (`containerd-shim-containix-v1`) that:
 
 ## Prerequisites
 
-- Go 1.26.3+ (required by containerd v2.3.x)
-- A Linux machine (or VM) with containerd installed (k3s works fine)
+- Go 1.22+ (exact minimum depends on which containerd version you target — see "Pin to your target containerd version" below)
+- A Linux machine (or VM) with containerd installed
 - Root access (containerd requires it)
+
+## Pin to your target containerd version
+
+> **Important**: the shim is part of a wire protocol contract with containerd. Build your shim against the **same containerd library version as the daemon running on your target node**, or the bootstrap handshake will fail with confusing errors like `unsupported protocol:Yunix` (a sign the daemon is parsing your shim's response with the wrong protocol version).
+
+Find your target daemon's version:
+
+```bash
+# on the target machine (or in your dev VM if it matches the target)
+containerd --version
+# e.g. "containerd github.com/containerd/containerd/v2 v2.2.3"
+```
+
+Then pin the shim's library dep to match:
+
+```bash
+# replace v2.2.3 with whatever your daemon runs
+go get github.com/containerd/containerd/v2@v2.2.3
+```
+
+You also need a compatible `containerd/api` version. Find the right one in containerd's go.mod for that release:
+
+```bash
+curl -s https://raw.githubusercontent.com/containerd/containerd/v2.2.3/go.mod | grep containerd/api
+# e.g. "github.com/containerd/containerd/api v1.10.0"
+
+go get github.com/containerd/containerd/api@v1.10.0
+go mod tidy
+```
+
+If your shim ever needs to support multiple target containerd versions, build separate binaries per target.
 
 ## Architecture recap
 
@@ -81,15 +112,15 @@ import (
 )
 
 func main() {
-	shim.RunShim(context.Background(), manager.NewShimManager("io.containerd.containix.v1"))
+	shim.Run(context.Background(), manager.NewShimManager("io.containerd.containix.v1"))
 }
 ```
 
-Two important details:
+Key points:
 
-- **`shim.RunShim`**, not `shim.Run`. The latter is deprecated. The signature is `RunShim(ctx, shim, opts...)`.
+- **`shim.Run` vs `shim.RunShim`.** Same call shape, signature is `(ctx, Shim, opts...)`. The function was renamed in containerd v2.3 — `Run` is the current name in v2.2 and earlier, `RunShim` is the v2.3+ name with `Run` deprecated as an alias. Use whichever your target containerd's library exports. If you see `undefined: shim.RunShim` at build time, you're on v2.2 and need `shim.Run`. If you see `shim.Run is deprecated, use RunShim`, you're on v2.3+.
 - **`manager.NewShimManager` from the upstream runc shim** handles the bootstrap layer (`Shim` interface). Pass your runtime ID; the manager handles everything else (process spawning, socket plumbing, signal handling).
-- The blank import `_ "github.com/atmask/containix/pkg/shimservice"` triggers the package's `init()` function, which registers our task plugin in containerd's plugin registry. `shim.RunShim` looks the plugin up by ID at runtime.
+- The blank import `_ "github.com/atmask/containix/pkg/shimservice"` triggers the package's `init()` function, which registers our task plugin in containerd's plugin registry. `shim.Run` looks the plugin up by ID at runtime.
 
 ## Step 3: Register the task plugin
 
@@ -150,13 +181,30 @@ import (
 	"log"
 
 	taskAPI "github.com/containerd/containerd/api/runtime/task/v3"
+	"github.com/containerd/ttrpc"
 )
-``
+
 // Service wraps the upstream runc task service. Methods not explicitly
 // overridden are forwarded via interface embedding — TTRPCTaskService's
 // 17 methods are all promoted from the embedded field.
 type Service struct {
 	taskAPI.TTRPCTaskService
+}
+
+// RegisterTTRPC is required by containerd's shim framework. The framework
+// type-asserts every loaded plugin to `shim.TTRPCService` (which requires
+// this single method) to know what to wire onto the TTRPC server.
+//
+// The embedded `taskAPI.TTRPCTaskService` interface does NOT declare
+// RegisterTTRPC, so interface embedding alone doesn't satisfy
+// `shim.TTRPCService`. Without this explicit method, the framework errors
+// at daemon startup with: "required that ttrpc service".
+//
+// We register `s` (our wrapper) so RPCs land on our Create override,
+// not on the inner upstream service directly.
+func (s *Service) RegisterTTRPC(server *ttrpc.Server) error {
+	taskAPI.RegisterTTRPCTaskService(server, s)
+	return nil
 }
 
 // Create is the one method we intercept. For now, just log and forward.
@@ -177,16 +225,37 @@ When you want to add interception for another method later, just define it on `*
 
 > **Gotcha**: this only works because Go interfaces support embedding. The embedded field has the same name as the interface (`TTRPCTaskService`), so we reference it as `s.TTRPCTaskService.Create(...)` when forwarding.
 
+### Why RegisterTTRPC has to be defined explicitly (not promoted)
+
+Interface embedding promotes only the methods **declared by the embedded interface**, not the methods of whatever concrete value happens to fill it at runtime.
+
+The upstream `task.NewTaskService` returns a concrete struct that implements *both* `taskAPI.TTRPCTaskService` (17 methods) and `shim.TTRPCService` (the single-method `RegisterTTRPC`). But its return type is declared as `taskAPI.TTRPCTaskService` — the narrower interface. When we embed that interface, only the 17 declared methods are visible to the Go compiler; `RegisterTTRPC` is hidden even though the underlying value has it.
+
+The shim framework walks every registered plugin and type-asserts to `shim.TTRPCService`. If our wrapper doesn't satisfy that interface, the assertion fails silently and our task plugin is dropped — leading to "required that ttrpc service" when the framework checks that at least one TTRPC service registered.
+
+The fix is to define `RegisterTTRPC` on our wrapper ourselves, registering `s` (the wrapper) as the task service on the TTRPC server. Now:
+1. `*Service` satisfies `shim.TTRPCService` (compile-time evidence: this method).
+2. Incoming RPCs land on our wrapper, so our `Create` override fires. (If we forwarded to the inner's `RegisterTTRPC` instead, the inner would be wired up directly and our override would be bypassed.)
+
 ## Step 5: Add dependencies and build
 
-```bash
-go get github.com/containerd/containerd/v2@latest
-go mod tidy
+If you haven't already pinned versions in the "Pin to your target containerd version" section:
 
-CGO_ENABLED=0 go build -o bin/containerd-shim-containix-v1 ./cmd/containerd-shim-containix-v1/
+```bash
+go get github.com/containerd/containerd/v2@<your-target-version>
+go get github.com/containerd/containerd/api@<matching-api-version>
+go mod tidy
 ```
 
-`CGO_ENABLED=0` produces a statically linked binary, avoiding glibc version mismatches between your build host and the node.
+Then build. From your dev machine, cross-compile to match the target node:
+
+```bash
+GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o bin/containerd-shim-containix-v1 ./cmd/containerd-shim-containix-v1/
+```
+
+Substitute `GOARCH=amd64` for x86_64 nodes. `CGO_ENABLED=0` produces a statically linked binary, avoiding glibc version mismatches between your build host and the node.
+
+If building directly on the target machine (same OS+arch), drop the GOOS/GOARCH and let `go build` infer them.
 
 ## Step 6: Install and configure containerd
 
@@ -275,12 +344,26 @@ This is the foundation. The shim currently does nothing different from the defau
 
 ## Gotchas
 
+- **Library version must match the daemon.** Shim ↔ containerd is a versioned wire protocol. A shim built against containerd v2.3 talking to a v2.2 daemon fails with "unsupported protocol:Yunix" (a sign that the daemon is parsing a protobuf bootstrap response with the old plain-text parser). Always pin to the target daemon's version.
+- **`shim.Run` vs `shim.RunShim` depends on version.** v2.2 only exports `Run`. v2.3+ exports both, but `Run` is deprecated there. Match what your pinned containerd library exports.
+- **Without `RegisterTTRPC`, the daemon fails to start** with `"required that ttrpc service"`. The shim framework type-asserts every loaded plugin to `shim.TTRPCService`; if your wrapper doesn't satisfy that, no TTRPC services register and the daemon exits.
 - **The shim must be statically linked** or have all its library dependencies available on the node. `CGO_ENABLED=0 go build` produces a static binary.
 - **containerd spawns the shim, which then reparents itself to PID 1.** Don't be surprised that the shim isn't a child of containerd in `pstree`. That's the [[double-fork-daemonization|double-fork]] equivalent at work — it's what lets containerd restart without killing containers.
 - **Logs go to containerd's log output**, not stdout. Use `journalctl -u containerd` (or `journalctl -u k3s` on k3s) to see them.
 - **The shim binary name must match exactly**: `containerd-shim-containix-v1`. containerd resolves `runtime_type = "io.containerd.containix.v1"` to `containerd-shim-containix-v1` on `$PATH`. If it can't find the binary, you get a cryptic "not found" error.
 - **Don't blank-import both your task plugin and the upstream one.** They register under the same plugin ID (`"task"`) and the second registration will fail at runtime. Only import your `pkg/shimservice/`.
-- **Go version matters.** containerd v2.3.x requires Go 1.26.3+. The toolchain directive in `go.mod` will get bumped automatically by `go get`.
+
+## Debugging hints
+
+When the smoke test fails, the symptoms map to specific bugs:
+
+| Symptom | Likely cause |
+|---|---|
+| `ctr: image "...": not found` | Image not pulled. Run `sudo ctr image pull <image>` first. |
+| `failed to create TTRPC connection: unsupported protocol:Yunix` | containerd library version doesn't match the daemon's bootstrap protocol. Pin to the daemon's version. |
+| `ttrpc: closed` + `required that ttrpc service` in logs | Your wrapper doesn't satisfy `shim.TTRPCService`. Add the `RegisterTTRPC` method. |
+| `undefined: shim.RunShim` at build time | You're on containerd v2.2 or earlier; use `shim.Run`. |
+| `cannot find package "io.containerd.runc.v2"` or similar | The wrong `containerd/api` version; check what containerd's go.mod for your version pins. |
 
 ## Next
 
