@@ -74,6 +74,10 @@ const (
 	AnnotationEntrypoint = "containix.dev/entrypoint"
 )
 
+// ContainixConfig captures the containix-specific annotations from the bundle.
+// Entrypoint is interpreted as a path relative to the flake's resolved store
+// path (e.g. "bin/hello"). If you really need to point at a different
+// location, prefix with "/" for an absolute path.
 type ContainixConfig struct {
 	FlakeRef   string
 	Entrypoint string
@@ -160,6 +164,11 @@ func Closure(storePath string) ([]string, error) {
 
 The rootfs needs to contain the Nix store paths. We bind-mount each closure path into the container's rootfs under `/nix/store/`.
 
+Two things this function gets right that you might miss in a first pass:
+
+1. **The rootfs directory comes from `spec.Root.Path`, not a hardcoded `"rootfs"`.** Convention is to call it `rootfs/`, but the OCI spec allows any path — relative to the bundle (the usual case) or absolute. Reading the spec is the correct OCI-compliant way to find it.
+2. **The entrypoint annotation is resolved against the flake's store path.** Users write `bin/hello`, not `/nix/store/abc-hello-2.12.1/bin/hello`. The shim does the join so pod specs don't have to know about hashes. Absolute entrypoints (starting with `/`) are still honored as an escape hatch.
+
 ```go
 // pkg/nix/rootfs.go
 package nix
@@ -169,13 +178,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	ocispec "github.com/opencontainers/runtime-spec/specs-go"
 )
 
 // PrepareRootfs modifies the OCI bundle to mount Nix store paths
-// and set the entrypoint.
-func PrepareRootfs(bundlePath string, cfg *ContainixConfig, storePaths []string) error {
+// and resolve the entrypoint against the flake's store path.
+func PrepareRootfs(bundlePath, storePath string, cfg *ContainixConfig, closurePaths []string) error {
 	specPath := filepath.Join(bundlePath, "config.json")
 	data, err := os.ReadFile(specPath)
 	if err != nil {
@@ -187,24 +197,27 @@ func PrepareRootfs(bundlePath string, cfg *ContainixConfig, storePaths []string)
 		return fmt.Errorf("parsing spec: %w", err)
 	}
 
+	// Resolve the rootfs path from the OCI spec. Per the OCI runtime spec,
+	// Root.Path may be relative to the bundle (the common case, usually
+	// "rootfs") or absolute. Honor both.
+	rootfs := spec.Root.Path
+	if !filepath.IsAbs(rootfs) {
+		rootfs = filepath.Join(bundlePath, rootfs)
+	}
+
 	// Create /nix/store in the rootfs
-	rootfs := filepath.Join(bundlePath, "rootfs")
 	nixStore := filepath.Join(rootfs, "nix", "store")
 	if err := os.MkdirAll(nixStore, 0755); err != nil {
 		return fmt.Errorf("creating /nix/store in rootfs: %w", err)
 	}
 
-	// Create mount targets and add bind mounts for each store path
-	for _, sp := range storePaths {
+	// Create mount targets and add bind mounts for each closure path.
+	// runc will create the destination directories inside the container's
+	// mount namespace at start time if they don't exist — we don't need to
+	// pre-create them on the host. Doing so would leave empty dirs on the
+	// host's bundle/rootfs that containerd can't clean up later.
+	for _, sp := range closurePaths {
 		base := filepath.Base(sp)
-		mountpoint := filepath.Join(nixStore, base)
-
-		// Create mount target directory
-		if err := os.MkdirAll(mountpoint, 0755); err != nil {
-			return fmt.Errorf("creating mount target %s: %w", mountpoint, err)
-		}
-
-		// Add bind mount to OCI spec
 		spec.Mounts = append(spec.Mounts, ocispec.Mount{
 			Destination: filepath.Join("/nix/store", base),
 			Source:      sp,
@@ -213,16 +226,45 @@ func PrepareRootfs(bundlePath string, cfg *ContainixConfig, storePaths []string)
 		})
 	}
 
-	// Create essential directories that processes expect
-	for _, dir := range []string{"tmp", "proc", "sys", "dev", "etc"} {
-		if err := os.MkdirAll(filepath.Join(rootfs, dir), 0755); err != nil {
-			return fmt.Errorf("creating /%s: %w", dir, err)
-		}
-	}
+	// Ensure the OS pseudo-filesystems are mounted. Without /proc and /sys,
+	// many glibc code paths hang or fail. ctr's default OCI spec sometimes
+	// includes these, sometimes doesn't — make sure they're present without
+	// duplicating entries.
+	ensureMount(&spec, ocispec.Mount{
+		Destination: "/proc",
+		Type:        "proc",
+		Source:      "proc",
+		Options:     []string{"nosuid", "noexec", "nodev"},
+	})
+	ensureMount(&spec, ocispec.Mount{
+		Destination: "/sys",
+		Type:        "sysfs",
+		Source:      "sysfs",
+		Options:     []string{"nosuid", "noexec", "nodev", "ro"},
+	})
+	ensureMount(&spec, ocispec.Mount{
+		Destination: "/dev",
+		Type:        "tmpfs",
+		Source:      "tmpfs",
+		Options:     []string{"nosuid", "strictatime", "mode=755", "size=65536k"},
+	})
+	ensureMount(&spec, ocispec.Mount{
+		Destination: "/tmp",
+		Type:        "tmpfs",
+		Source:      "tmpfs",
+		Options:     []string{"nosuid", "nodev", "mode=1777"},
+	})
 
-	// Override entrypoint if specified
+	// Resolve and override entrypoint. The user supplies a path relative
+	// to the flake's store output (e.g. "bin/hello") so pod specs don't
+	// have to embed store hashes. Absolute paths are honored as-is for
+	// the cases where you really need to point elsewhere in /nix/store.
 	if cfg.Entrypoint != "" {
-		spec.Process.Args = []string{cfg.Entrypoint}
+		entrypoint := cfg.Entrypoint
+		if !strings.HasPrefix(entrypoint, "/") {
+			entrypoint = filepath.Join(storePath, entrypoint)
+		}
+		spec.Process.Args = []string{entrypoint}
 	}
 
 	// Write modified spec back
@@ -235,6 +277,18 @@ func PrepareRootfs(bundlePath string, cfg *ContainixConfig, storePaths []string)
 	}
 
 	return nil
+}
+
+// ensureMount adds m to spec.Mounts if no existing mount targets the same
+// destination. Idempotent — safe even when the upstream OCI spec already
+// provides /proc, /sys, etc.
+func ensureMount(spec *ocispec.Spec, m ocispec.Mount) {
+	for _, existing := range spec.Mounts {
+		if existing.Destination == m.Destination {
+			return
+		}
+	}
+	spec.Mounts = append(spec.Mounts, m)
 }
 ```
 
@@ -286,7 +340,7 @@ func (s *Service) Create(ctx context.Context, req *taskAPI.CreateTaskRequest) (*
 		}
 		log.Printf("[containix] closure: %d paths", len(closure))
 
-		if err := nix.PrepareRootfs(req.Bundle, cfg, closure); err != nil {
+		if err := nix.PrepareRootfs(req.Bundle, storePath, cfg, closure); err != nil {
 			return nil, fmt.Errorf("preparing rootfs: %w", err)
 		}
 	}
@@ -340,25 +394,45 @@ func FromBundle(bundlePath string) (*ContainixConfig, error) {
 ## Step 5: Test it
 
 ```bash
-# Build
-CGO_ENABLED=0 go build -o bin/containerd-shim-containix-v1 ./cmd/containerd-shim-containix-v1/
-sudo cp bin/containerd-shim-containix-v1 /usr/local/bin/
+# Build and install (use the project's justfile if you have one)
+just install
+# or equivalently:
+#   go build -o bin/containerd-shim-containix-v1 ./cmd/containerd-shim-containix-v1/
+#   sudo install -m 755 bin/containerd-shim-containix-v1 /var/lib/containix/bin/
+#   sudo systemctl restart containerd
 
-# Build a test flake with a simple hello world
-# (see test-flake/ in this repo for an example)
-
-# Run with ctr, passing annotations
+# Smoke test with nixpkgs#hello — no need to look up store paths anymore.
+# Entrypoint is relative to whatever the flake produces as its output.
 sudo ctr run \
   --rm \
   --runtime io.containerd.containix.v1 \
-  --label containix.dev/flake="path:/path/to/test-flake#default" \
-  --label containix.dev/entrypoint="/nix/store/xxx-hello-2.12/bin/hello" \
+  --label containix.dev/flake="nixpkgs#hello" \
+  --label containix.dev/entrypoint="bin/hello" \
   docker.io/library/alpine:latest \
-  test-nix-rootfs
+  containix-smoke-test
 
-# Check logs
+# Should print:  Hello, world!
+
+# Watch shim logs in another terminal to see the lifecycle:
 sudo journalctl -u containerd -f | grep containix
 ```
+
+Expected output:
+
+```
+Hello, world!
+```
+
+Expected log lines:
+
+```
+[containix] Create called: id=containix-smoke-test bundle=/run/containerd/...
+[containix] Nix flake detected: nixpkgs#hello
+[containix] store path: /nix/store/<hash>-hello-2.12.x
+[containix] closure: 5 paths
+```
+
+The container exits immediately (hello prints and returns). If you don't see "Hello, world!" within a few seconds, see the debugging section in Tutorial 3.
 
 ## A test flake
 
@@ -385,9 +459,11 @@ The core of containix: a shim that resolves Nix flake references and assembles c
 ## Known limitations at this point
 
 - **Cold start is slow**: `nix build` on first run fetches from the binary cache. We address this in Tutorial 5.
-- **Full Nix store paths as entrypoints**: Not ergonomic. The entrypoint is something like `/nix/store/abc123-hello-2.12/bin/hello`. We could improve this with wrapper scripts or profile links (Tutorial 6).
-- **No caching of resolved flakes**: Every `Create` runs `nix build` from scratch. We'll add a resolution cache later.
-- **Annotations vs dedicated fields**: Using OCI annotations works but isn't discoverable. A CRD or admission webhook could improve UX.
+- **No caching of resolved flakes**: every `Create` runs `nix build` from scratch. Even when the flake's already built locally, `nix build` re-evaluates the flake.nix — measurable latency for large flakes. We'll add a resolution cache later.
+- **Entrypoint annotation is still required.** Today the user has to provide `containix.dev/entrypoint=bin/hello`. The end state should be: shim reads `meta.mainProgram` from the derivation (what `nix run` does) and the annotation becomes optional — for well-formed flakes, just `containix.dev/flake=<ref>` is enough. The relative-path step in this tutorial is a meaningful improvement over absolute store paths but not the final UX. Tutorial 5 or 6 territory.
+- **Entrypoint is relative to one store path**: works for single-derivation flakes. Multi-output flakes (e.g., a flake exposing both `packages.default` and `packages.cli`) would benefit from being able to reference different outputs in the entrypoint. Not a problem for Tutorial 2 scope.
+- **Non-FHS rootfs**: the container sees `/nix/store/...` paths but no conventional `/bin`, `/usr`, `/lib`. Apps that hardcode `/etc/myapp/config.yaml` won't find their config. Tutorial 6 adds an FHS-like view via `buildEnv` for apps that need it.
+- **Annotations vs dedicated fields**: using OCI annotations works but isn't discoverable. A CRD or admission webhook could improve UX.
 
 ## Next
 
