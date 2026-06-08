@@ -49,7 +49,7 @@ func PrepareRootfs(bundlePath string, storePath string, cfg *ContainixConfig, cl
 		if !strings.HasPrefix(entrypoint, "/") {
 			entrypoint = filepath.Join(storePath, entrypoint)
 		}
-		spec.Process.Args = []string{cfg.Entrypoint}
+		spec.Process.Args = []string{entrypoint}
 	}
 
 	modified, err := json.Marshal(spec)
