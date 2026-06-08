@@ -59,7 +59,7 @@ func (s *Service) Create(ctx context.Context, req *taskAPI.CreateTaskRequest) (*
 		}
 		log.Printf("[containix] closure: %d paths", len(closure))
 
-		if err := nix.PrepareRootfs(req.Bundle, cfg, closure); err != nil {
+		if err := nix.PrepareRootfs(req.Bundle, storePath, cfg, closure); err != nil {
 			return nil, fmt.Errorf("preparing rootfs: %w", err)
 		}
 	}

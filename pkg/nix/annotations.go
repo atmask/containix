@@ -11,7 +11,7 @@ import (
 
 const (
 	AnnotationFlake         = "containix.dev/flake"
-	AnnotationEntrypoint    = "containinx/dev/entrypoint"
+	AnnotationEntrypoint    = "containix.dev/entrypoint"
 	AnnotationContainerType = "io.kubernetes.cri.container-type" // injected but CRI
 )
 

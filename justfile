@@ -24,7 +24,7 @@ test: install pull
   sudo ctr run --rm \
     --runtime io.containerd.containix.v1 \
     --label containix.dev/flake="nixpkgs#hello" \
-    --label containix.dev/entrypoint="$(nix build --no-link --print-out-paths nixpkgs#hello)/bin/hello" \
+    --label containix.dev/entrypoint="bin/hello" \
     docker.io/library/alpine:latest containix-smoke-test
 
 logs: 
