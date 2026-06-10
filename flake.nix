@@ -16,6 +16,23 @@
       (system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
+          isLinux = pkgs.stdenv.isLinux;
+
+          containixPkg = pkgs.buildGoModule {
+            pname = "containerd-shim-containix-v1";
+            version = "0.1.0";
+            src = "./.";
+            vendorHash = pkgs.lib.fakeHash;
+            subPackages = [ "cmd/containerd-shim-containix-v1" ];
+            env.CGO_ENABLED = "0";
+            meta = with pkgs.lib; {
+              description = "containerd shim that runs Nix flakes";
+              homepage = "https://github.com/atmask/containix";
+              license = licenses.asl20;
+              platforms = platforms.linux;
+              mainProgram = "containerd-shim-containix-v1";
+            };
+          };
         in
         {
           devShells.default = pkgs.mkShell {
@@ -68,5 +85,7 @@
               echo
             '';
           };
+        } // pkgs.lib.optionalAttrs isLinux {
+          pkgs.default = containixPkg;
         });
 }
