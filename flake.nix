@@ -86,6 +86,6 @@
             '';
           };
         } // pkgs.lib.optionalAttrs isLinux {
-          pkgs.default = containixPkg;
+          packages.default = containixPkg;
         });
 }
