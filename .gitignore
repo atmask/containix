@@ -1,1 +1,23 @@
-bin
+# Build outputs
+bin/
+result
+result-*
+
+# direnv cache
+.direnv/
+
+# Local environment overrides (not tracked)
+.envrc.local
+
+# Editor / IDE
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.DS_Store
+
+# Go
+*.test
+*.out
+coverage.txt
+coverage.html
