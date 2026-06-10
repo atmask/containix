@@ -49,7 +49,23 @@
               fi
 
               echo "containix dev shell"
-              go version
+              echo
+              echo "Tools:"
+              echo "  $(go version)"
+              echo "  just $(just --version 2>/dev/null | awk '{print $2}')"
+              echo
+              echo "Common commands:"
+              echo "  just build    — cross-compile shim for linux/arm64 (works on Mac too)"
+              if [ "$(uname)" = "Linux" ]; then
+                echo "  just install  — build + install + restart containerd"
+                echo "  just test     — install + smoke test (alpine + nixpkgs#hello)"
+                echo "  just logs     — tail containerd logs filtered to containix"
+              else
+                echo "  just install  — Linux only (run from a Linux dev VM)"
+                echo "  just test     — Linux only (run from a Linux dev VM)"
+                echo "  just logs     — Linux only (run from a Linux dev VM)"
+              fi
+              echo
             '';
           };
         });

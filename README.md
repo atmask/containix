@@ -45,6 +45,24 @@ spec:
 
 **Early development.** See [tutorials/](./tutorials/) for a step-by-step build journal.
 
+## Development
+
+Nix-managed dev environment. With [Nix](https://nixos.org/download) and [direnv](https://direnv.net/) installed:
+
+```bash
+git clone https://github.com/atmask/containix
+cd containix
+direnv allow          # first time only — loads the Nix dev shell
+```
+
+Without direnv:
+
+```bash
+nix develop
+```
+
+The dev shell installs Go, just, gopls, golangci-lint, pre-commit, and the configured hooks. See [`justfile`](./justfile) for common commands (`just build`, `just install`, `just test`).
+
 ## Architecture
 
 ```
