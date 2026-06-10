@@ -109,4 +109,4 @@ This project is built incrementally. Each tutorial builds on the last:
 
 ## License
 
-MIT
+Copyright 2026 Ben Mask. Licensed under the [Apache License 2.0](./LICENSE). See [NOTICE](./NOTICE) for attribution.
