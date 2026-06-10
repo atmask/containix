@@ -7,6 +7,7 @@ Make containix robust enough to run real workloads. This tutorial covers the thi
 - Timeouts and failure handling for Nix operations
 - Prometheus metrics from the shim
 - FHS-compatible rootfs (no raw store paths in entrypoints)
+- Default-package + `meta.mainProgram` conventions for zero-annotation pods
 - Security considerations
 - Operational runbooks
 
@@ -147,7 +148,155 @@ annotations:
   containix.dev/entrypoint: "/bin/myapp"
 ```
 
-## Step 4: Security
+## Step 4: Default package and `meta.mainProgram` conventions
+
+The end state for UX is a pod spec with **one annotation**:
+
+```yaml
+annotations:
+  containix.dev/flake: "github:myorg/myapp"
+```
+
+No entrypoint. No path hashes. No buildEnv reference. The shim figures out everything else by leveraging two Nix conventions that users should follow when authoring flakes for containix.
+
+### The `packages.<system>.default` convention
+
+When a Nix flake is referenced **without an attribute path** (e.g., `github:org/repo` vs. `github:org/repo#someName`), Nix resolves it to `packages.<system>.default`. This is the established convention for "the main thing this flake produces."
+
+Users author their flakes accordingly:
+
+```nix
+{
+  outputs = { self, nixpkgs, ... }: let
+    system = "aarch64-linux";
+    pkgs = nixpkgs.legacyPackages.${system};
+  in {
+    packages.${system}.default = pkgs.buildGoModule {
+      pname = "myapp";
+      version = "1.0";
+      src = ./.;
+      vendorHash = "sha256-...";
+      meta.mainProgram = "myapp";   # ← see next section
+    };
+  };
+}
+```
+
+This is also what `nix build .` (with no attribute) builds. Same convention everywhere.
+
+### The `meta.mainProgram` attribute
+
+Nix derivations can declare which binary in the output is the "main" one. This is what `nix run` uses to pick the executable — if `meta.mainProgram = "myapp"` is set, `nix run github:myorg/myapp` executes `$out/bin/myapp`.
+
+Containix should read the same attribute and use it as the default entrypoint:
+
+```go
+// pkg/nix/build.go
+
+type FlakeOutput struct {
+    StorePath   string
+    MainProgram string  // empty if the derivation didn't declare one
+}
+
+// Build resolves a flake reference, returning the store path AND metadata
+// useful for entrypoint resolution.
+func Build(ctx context.Context, flakeRef string) (FlakeOutput, error) {
+    // 1. Build the flake output as usual
+    out, err := exec.CommandContext(ctx, "nix", "build",
+        "--no-link", "--print-out-paths",
+        "--no-update-lock-file", "--no-write-lock-file",
+        flakeRef,
+    ).Output()
+    if err != nil {
+        return FlakeOutput{}, fmt.Errorf("nix build: %w", err)
+    }
+    storePath := strings.TrimSpace(string(out))
+
+    // 2. Read meta.mainProgram — best-effort, empty if absent.
+    // The "or \"\"" pattern means "use the empty string if mainProgram isn't set."
+    metaCmd := exec.CommandContext(ctx, "nix", "eval", "--raw",
+        fmt.Sprintf(`%s.meta.mainProgram or ""`, flakeRef),
+    )
+    metaOut, _ := metaCmd.Output()  // ignore errors; absent is fine
+    mainProgram := strings.TrimSpace(string(metaOut))
+
+    return FlakeOutput{StorePath: storePath, MainProgram: mainProgram}, nil
+}
+```
+
+### Entrypoint resolution in priority order
+
+With both conventions available, the entrypoint resolution becomes a three-tier waterfall:
+
+```go
+func resolveEntrypoint(cfg *ContainixConfig, flake FlakeOutput) (string, error) {
+    switch {
+    case strings.HasPrefix(cfg.Entrypoint, "/"):
+        // Explicit absolute path — use as-is.
+        return cfg.Entrypoint, nil
+
+    case cfg.Entrypoint != "":
+        // Explicit relative path — join against the flake's store path.
+        return filepath.Join(flake.StorePath, cfg.Entrypoint), nil
+
+    case flake.MainProgram != "":
+        // Default: bin/<mainProgram> in the flake's output.
+        return filepath.Join(flake.StorePath, "bin", flake.MainProgram), nil
+
+    default:
+        return "", fmt.Errorf(
+            "no entrypoint resolved for flake %q:\n"+
+                "  - no %q annotation provided\n"+
+                "  - flake does not declare meta.mainProgram on its default package\n"+
+                "fix: either add the annotation or set meta.mainProgram in the derivation",
+            cfg.FlakeRef, AnnotationEntrypoint)
+    }
+}
+```
+
+### Three tiers of UX
+
+| Annotation | What the shim does | User burden |
+|---|---|---|
+| just `containix.dev/flake=github:org/app` | Build `packages.${system}.default`, read `meta.mainProgram`, exec `$out/bin/$mainProgram` | None |
+| `containix.dev/entrypoint=bin/foo` | Build the flake's default, exec `$out/bin/foo` | Specify a binary name |
+| `containix.dev/entrypoint=/explicit/path` | Use the absolute path literally | Full path needed |
+
+### The goal pod spec
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: my-app
+  annotations:
+    containix.dev/flake: "github:myorg/myapp"
+spec:
+  runtimeClassName: containix
+  containers:
+  - name: app
+    image: containix/empty:1.0.0
+```
+
+If the flake's default package declares `meta.mainProgram = "myapp"`, containix execs `/nix/store/<hash>-myapp/bin/myapp` inside the container. No paths, no hashes, no entrypoints in the manifest. The flake is the single source of truth.
+
+### Why this matters
+
+This isn't just ergonomic polish — it's about **separating concerns correctly**:
+
+- Pod specs say "run this flake."
+- The flake's `flake.nix` says "this is what I produce and how to run it."
+- The shim just connects them.
+
+Without `meta.mainProgram` support, pod specs have to know the binary name. That's a leak — the binary name is a flake-internal detail that should change when the flake changes, without requiring pod-spec edits. With this convention, you can rename a binary in your flake without touching any pod manifests.
+
+### Edge cases worth documenting
+
+- **Multi-output flakes**: `packages.${system}.serverCli` and `packages.${system}.workerCli`. Users reference them explicitly: `containix.dev/flake=github:org/app#serverCli`. The `#default` convention still works for the "main" output.
+- **Flakes without `meta.mainProgram`**: nixpkgs packages mostly have this set; user-authored flakes often don't. The error message in `resolveEntrypoint` should point users at the docs.
+- **Derivations with multiple binaries**: `meta.mainProgram` picks ONE. Other binaries are still in `$out/bin/` — accessible via the absolute-path escape hatch, but not as a default.
+
+## Step 5: Security
 
 ### Restrict Nix evaluation
 
@@ -197,7 +346,7 @@ if spec.Process.User.UID == 0 {
 }
 ```
 
-## Step 5: Error handling and failure modes
+## Step 6: Error handling and failure modes
 
 ### Nix daemon not running
 
@@ -231,7 +380,7 @@ nix-store --verify --check-contents --repair
 
 The shim shouldn't attempt this automatically. Surface a metric and alert.
 
-## Step 6: Operational runbook
+## Step 7: Operational runbook
 
 ### Pod stuck in ContainerCreating
 
