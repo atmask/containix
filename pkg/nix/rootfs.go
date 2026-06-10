@@ -10,8 +10,8 @@ import (
 	ocispec "github.com/opencontainers/runtime-spec/specs-go"
 )
 
-// PrepareRootfs modified the OCI bundle to mount hte Nix store paths
-// and set the entrypoint
+// PrepareRootfs modifies the OCI bundle to mount the Nix store paths
+// and set the entrypoint.
 func PrepareRootfs(bundlePath string, storePath string, cfg *ContainixConfig, closurePaths []string) error {
 	specPath := filepath.Join(bundlePath, "config.json")
 	data, err := os.ReadFile(specPath)
@@ -24,13 +24,9 @@ func PrepareRootfs(bundlePath string, storePath string, cfg *ContainixConfig, cl
 		return fmt.Errorf("parsing spec: %w", err)
 	}
 
-	rootfs := spec.Root.Path
-	if !filepath.IsAbs(rootfs) {
-		rootfs = filepath.Join(bundlePath, rootfs)
-	}
-
-	// Create the mount targets and add bind mounts for each
-	// store path of the closure
+	// Add bind mounts for each store path of the closure. runc creates the
+	// mount target directories inside the container's mount namespace at
+	// start time, so we don't need to pre-create them on the host.
 	for _, sp := range closurePaths {
 		base := filepath.Base(sp)
 		// Add bind mount to the OCI spec

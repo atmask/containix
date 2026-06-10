@@ -27,6 +27,5 @@ test: install pull
     --label containix.dev/entrypoint="bin/hello" \
     docker.io/library/alpine:latest containix-smoke-test
 
-logs: 
+logs:
   sudo journalctl -u containerd -f | grep containix
-

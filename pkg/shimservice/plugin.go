@@ -11,9 +11,8 @@ import (
 	"github.com/containerd/plugin/registry"
 )
 
-// Init called at package initialization
-// It is used here to register the shim service into the
-// global registry in the Data segement of memory
+// init runs at package load time. It registers the shim's task service
+// into containerd's global plugin registry (lives in the data segment).
 // Compare to: containerd/cmd/containerd-shim-runc-v2/task/plugin
 func init() {
 	registry.Register(&plugin.Registration{

@@ -1,0 +1,64 @@
+# Pre-commit hooks for containix.
+# Install: enter the Nix dev shell (`nix develop` or `direnv allow`).
+# Run manually: `pre-commit run --all-files`.
+# Skip once: `git commit --no-verify`.
+
+repos:
+  # Generic file hygiene
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-added-large-files
+        args: [--maxkb=500]
+
+  # Go: format + vet + lint (uses the toolchain from the Nix dev shell)
+  - repo: local
+    hooks:
+      - id: gofmt
+        name: gofmt
+        entry: gofmt -l -w
+        language: system
+        types: [go]
+        pass_filenames: true
+      - id: go-vet
+        name: go vet
+        entry: bash -c 'go vet ./...'
+        language: system
+        types: [go]
+        pass_filenames: false
+      - id: golangci-lint
+        name: golangci-lint
+        entry: bash -c 'golangci-lint run ./...'
+        language: system
+        types: [go]
+        pass_filenames: false
+
+  # Nix formatting
+  - repo: local
+    hooks:
+      - id: nixpkgs-fmt
+        name: nixpkgs-fmt
+        entry: nixpkgs-fmt
+        language: system
+        types: [nix]
+
+  # Shell scripts
+  - repo: local
+    hooks:
+      - id: shellcheck
+        name: shellcheck
+        entry: shellcheck
+        language: system
+        types: [shell]
+
+  # Typo detection
+  - repo: https://github.com/crate-ci/typos
+    rev: v1.24.6
+    hooks:
+      - id: typos
+        args: []  # no auto-fix; report only
+        exclude: ^go\.sum$
