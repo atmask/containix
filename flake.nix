@@ -7,7 +7,7 @@
   };
 
   outputs = { self, nixpkgs, flake-utils }:
-    let:
+    let
       perSystem = flake-utils.lib.eachSystem [
         "aarch64-darwin"
         "x86_64-darwin"
@@ -18,7 +18,7 @@
           let
             pkgs = nixpkgs.legacyPackages.${system};
             isLinux = pkgs.stdenv.isLinux;
-  
+
             containixPkg = pkgs.buildGoModule {
               pname = "containerd-shim-containix-v1";
               version = "0.1.0";
@@ -38,34 +38,34 @@
           {
             devShells.default = pkgs.mkShell {
               name = "containix-dev";
-  
+
               packages = with pkgs; [
                 # Toolchain
                 go # needs >= 1.26.3 for containerd v2.3.x
                 just # task runner used by ./justfile
                 git
-  
+
                 # Go dev tooling
                 gopls # Go language server (editor LSP)
                 gotools # goimports, etc.
                 gofumpt # stricter gofmt
                 go-tools # staticcheck and friends
                 golangci-lint
-  
+
                 # Pre-commit hook framework + the tools the configured hooks invoke
                 pre-commit
                 nixpkgs-fmt
                 shellcheck
                 typos
               ];
-  
+
               shellHook = ''
                 # Install the pre-commit hook into .git/hooks/ if it isn't already.
                 # Idempotent: pre-commit detects when it's already installed and skips.
                 if [ -d .git ]; then
                   ${pkgs.pre-commit}/bin/pre-commit install --install-hooks > /dev/null 2>&1 || true
                 fi
-  
+
                 echo "containix dev shell"
                 echo
                 echo "Tools:"
@@ -98,9 +98,59 @@
         {
           options.services.containix = {
             enable = lib.mkEnableOption "the containix containerd runtime shim";
-            
 
-          }
+            package = lib.mkOption {
+              type = lib.types.package;
+              default = self.packages.${pkgs.system}.default;
+              defaultText = lib.literalExpression
+                "containix.packages.\${pkgs.system}.default";
+              description = ''
+                The containix shim package to install on this node. Defaults to
+                the flake's own package output for the host's system.
+              '';
+            };
+
+            runtimeName = lib.mkOption {
+              type = lib.types.str;
+              default = "containix";
+              description = ''
+                Name used in containerd's runtime registration block and in the
+                Kubernetes RuntimeClass that routes pods to this shim.
+              '';
+            };
+
+            runtimeType = lib.mkOption {
+              type = lib.types.str;
+              default = "io.containerd.containix.v1";
+              description = ''
+                containerd runtime_type string. Must end in `.v<N>` matching
+                the shim binary's filename suffix (containerd-shim-containix-v1).
+              '';
+            };
+          };
+
+          config = lib.mkIf cfg.enable {
+            # Containerd must be running for the runtime registration to take
+            # effect. mkDefault lets a consumer override (e.g., if they want
+            # to manage containerd separately).
+            virtualisation.containerd.enable = lib.mkDefault true;
+
+            # Register the runtime in containerd's CRI config. The TOML output
+            # looks like:
+            #   [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.containix]
+            #     runtime_type = "io.containerd.containix.v1"
+            virtualisation.containerd.settings.plugins."io.containerd.grpc.v1.cri".containerd.runtimes.${cfg.runtimeName} = {
+              runtime_type = cfg.runtimeType;
+            };
+
+            # Put the shim binary on containerd's PATH so it can resolve
+            # runtime_type → containerd-shim-containix-v1 binary at exec time.
+            systemd.services.containerd.path = [ cfg.package ];
+
+            # Also expose system-wide for ad-hoc operator commands like
+            # `containerd-shim-containix-v1 -info` when debugging.
+            environment.systemPackages = [ cfg.package ];
+          };
         };
     };
 }
