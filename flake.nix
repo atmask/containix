@@ -21,8 +21,8 @@
           containixPkg = pkgs.buildGoModule {
             pname = "containerd-shim-containix-v1";
             version = "0.1.0";
-            src = "./.";
-            vendorHash = pkgs.lib.fakeHash;
+            src = ./.;
+            vendorHash = "sha256-xMO56JQnJhNfUIEchsy4aUjCCzeT2b6mq1V1GBj2o7Q=";
             subPackages = [ "cmd/containerd-shim-containix-v1" ];
             env.CGO_ENABLED = "0";
             meta = with pkgs.lib; {
