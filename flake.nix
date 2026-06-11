@@ -148,7 +148,7 @@
             systemd.services.containerd.path = [ 
               cfg.package 
               pkgs.nix
-              runc
+              pkgs.runc
             ];
 
             # Also expose system-wide for ad-hoc operator commands like
