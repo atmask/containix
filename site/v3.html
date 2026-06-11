@@ -1,0 +1,602 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>containix — Nix flakes, native to Kubernetes.</title>
+<meta name="description" content="A containerd shim that runs Nix flakes directly on Kubernetes — no container images required." />
+
+<meta name="go-import" content="containix.dev git https://github.com/atmask/containix" />
+<meta name="go-source" content="containix.dev https://github.com/atmask/containix https://github.com/atmask/containix/tree/main{/dir} https://github.com/atmask/containix/blob/main{/dir}/{file}#L{line}" />
+
+<link rel="icon" href="favicon.svg" type="image/svg+xml" />
+
+<style>
+  :root {
+    --bg: #f5f3ec;
+    --bg-soft: #ecead9;
+    --ink: #0a0a0a;
+    --ink-soft: #3a3a36;
+    --ink-mute: #6b6b62;
+    --rule: #1a1a1a;
+    --accent: #2c1aff;     /* electric ultramarine */
+    --accent-ink: #ffffff;
+    --highlight: #f0e94a;  /* lemon, used sparingly for marks */
+
+    --sans: ui-sans-serif, system-ui, -apple-system, "Inter", "Helvetica Neue", sans-serif;
+    --mono: ui-monospace, "JetBrains Mono", "SF Mono", "Menlo", monospace;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 17px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    overflow-x: hidden;
+  }
+  ::selection { background: var(--accent); color: var(--accent-ink); }
+  a { color: var(--ink); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  a:hover { color: var(--accent); }
+
+  .wrap {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 0 36px;
+  }
+
+  /* ============ TOP BAR ============ */
+  .topbar {
+    border-bottom: 2px solid var(--ink);
+    padding: 18px 0;
+    margin-bottom: 80px;
+  }
+  .topbar .row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.04em;
+  }
+  .topbar .wm {
+    font-weight: 800;
+    letter-spacing: 0.02em;
+    color: var(--ink);
+    text-decoration: none;
+    font-family: var(--sans);
+    font-size: 15px;
+  }
+  .topbar .wm em {
+    color: var(--accent);
+    font-style: normal;
+  }
+  .topbar .right { color: var(--ink-mute); }
+  .topbar .right a { color: var(--ink); text-decoration: none; }
+  .topbar .right a:hover { color: var(--accent); }
+  .topbar .right span { margin: 0 12px; color: var(--rule); }
+
+  /* ============ HERO ============ */
+  .hero {
+    margin-bottom: 96px;
+    position: relative;
+  }
+  .hero h1 {
+    font-size: clamp(54px, 11vw, 168px);
+    line-height: 0.88;
+    letter-spacing: -0.045em;
+    font-weight: 900;
+    color: var(--ink);
+    margin-bottom: 36px;
+    text-wrap: balance;
+  }
+  .hero h1 .accent {
+    color: var(--accent);
+    font-style: italic;
+    font-weight: 900;
+  }
+  .hero h1 .strike {
+    text-decoration: line-through;
+    text-decoration-thickness: 6px;
+    text-decoration-color: var(--accent);
+    color: var(--ink-mute);
+    font-style: normal;
+    font-weight: 900;
+  }
+  .hero .sub {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 48px;
+    margin-top: 32px;
+    border-top: 1px solid var(--ink);
+    padding-top: 28px;
+  }
+  @media (max-width: 760px) {
+    .hero .sub { grid-template-columns: 1fr; gap: 24px; }
+  }
+  .hero .sub p {
+    font-size: 19px;
+    line-height: 1.45;
+    max-width: 44ch;
+    color: var(--ink);
+  }
+  .hero .sub .meta {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--ink-mute);
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    margin-bottom: 12px;
+  }
+
+  /* ============ HUGE WATERMARK MARK ============ */
+  .watermark {
+    position: absolute;
+    right: -20px;
+    top: -40px;
+    font-family: Georgia, serif;
+    font-size: 280px;
+    line-height: 1;
+    color: var(--accent);
+    opacity: 0.06;
+    font-style: italic;
+    pointer-events: none;
+    user-select: none;
+    z-index: 0;
+  }
+  @media (max-width: 760px) {
+    .watermark { display: none; }
+  }
+
+  /* ============ SECTION FRAMING ============ */
+  section {
+    margin-bottom: 110px;
+    position: relative;
+  }
+  .label {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--ink);
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-weight: 700;
+    margin-bottom: 18px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .label::before {
+    content: "";
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    background: var(--accent);
+    border-radius: 0;
+  }
+
+  section h2 {
+    font-size: clamp(34px, 5.4vw, 60px);
+    line-height: 1;
+    letter-spacing: -0.025em;
+    font-weight: 900;
+    color: var(--ink);
+    margin-bottom: 28px;
+    max-width: 18ch;
+    text-wrap: balance;
+  }
+  section h2 .accent { color: var(--accent); font-style: italic; }
+
+  section p {
+    font-size: 18px;
+    line-height: 1.55;
+    max-width: 60ch;
+    margin-bottom: 18px;
+  }
+  section p.dim { color: var(--ink-soft); }
+
+  /* ============ SPEC ============ */
+  .spec {
+    display: grid;
+    grid-template-columns: 1fr 1.3fr;
+    gap: 48px;
+    align-items: start;
+  }
+  @media (max-width: 880px) {
+    .spec { grid-template-columns: 1fr; gap: 28px; }
+  }
+  .spec .text p { font-size: 18px; }
+  .listing {
+    font-family: var(--mono);
+    font-size: 13.5px;
+    line-height: 1.7;
+    background: var(--ink);
+    color: var(--bg);
+    padding: 26px 28px;
+    border-radius: 0;
+    overflow-x: auto;
+    position: relative;
+  }
+  .listing .filename {
+    position: absolute;
+    top: -1px;
+    left: 0;
+    background: var(--accent);
+    color: var(--accent-ink);
+    padding: 4px 12px;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    font-family: var(--mono);
+    transform: translateY(-100%);
+    font-weight: 700;
+  }
+  .listing .k { color: #8fa0ff; }
+  .listing .s { color: #ffe7a8; }
+  .listing .c { color: #757064; font-style: italic; }
+  .listing .n { color: var(--highlight); font-weight: 600; }
+
+  /* ============ THE FLOW (SVG-ish) ============ */
+  .flow {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0;
+    border: 2px solid var(--ink);
+  }
+  @media (max-width: 760px) {
+    .flow { grid-template-columns: 1fr; }
+    .flow .cell + .cell { border-left: none; border-top: 2px solid var(--ink); }
+  }
+  .flow .cell {
+    padding: 28px 24px;
+    background: var(--bg);
+    position: relative;
+    min-height: 180px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+  .flow .cell + .cell {
+    border-left: 2px solid var(--ink);
+  }
+  @media (max-width: 760px) {
+    .flow .cell + .cell { border-left: none; border-top: 2px solid var(--ink); }
+  }
+  .flow .cell .step {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    color: var(--accent);
+    font-weight: 700;
+    margin-bottom: 10px;
+  }
+  .flow .cell h3 {
+    font-size: 22px;
+    font-weight: 800;
+    letter-spacing: -0.012em;
+    line-height: 1.1;
+    margin-bottom: 12px;
+  }
+  .flow .cell p {
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--ink-soft);
+    margin: 0;
+    max-width: none;
+  }
+
+  /* ============ CLAIMS (no icons, no bento) ============ */
+  .claims {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0;
+    border-top: 2px solid var(--ink);
+  }
+  .claim {
+    display: grid;
+    grid-template-columns: 0.5fr 1fr 1.2fr;
+    gap: 32px;
+    align-items: baseline;
+    padding: 28px 0;
+    border-bottom: 1px solid var(--rule);
+  }
+  @media (max-width: 760px) {
+    .claim { grid-template-columns: 1fr; gap: 8px; }
+  }
+  .claim .n {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--ink-mute);
+    font-weight: 700;
+  }
+  .claim .h {
+    font-size: 26px;
+    font-weight: 800;
+    line-height: 1.05;
+    letter-spacing: -0.018em;
+  }
+  .claim .h em { font-style: italic; color: var(--accent); font-weight: 800; }
+  .claim .d {
+    font-size: 16px;
+    line-height: 1.55;
+    color: var(--ink-soft);
+    max-width: 50ch;
+  }
+
+  /* ============ STATUS BLOCK ============ */
+  .status {
+    background: var(--ink);
+    color: var(--bg);
+    padding: 56px 40px;
+    margin: 0 -36px;
+    border-top: 4px solid var(--accent);
+  }
+  .status .inner {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 0 0;
+  }
+  .status .label { color: var(--highlight); }
+  .status .label::before { background: var(--highlight); }
+  .status h2 { color: var(--bg); }
+  .status p { color: var(--bg); opacity: 0.85; max-width: 56ch; }
+  .status a { color: var(--bg); }
+  .status a:hover { color: var(--highlight); }
+
+  /* ============ END / LINK BLOCK ============ */
+  .end {
+    padding: 80px 0 40px;
+  }
+  .end h2 {
+    font-size: clamp(40px, 6.5vw, 80px);
+    line-height: 0.95;
+    letter-spacing: -0.03em;
+    font-weight: 900;
+    margin-bottom: 28px;
+    max-width: 14ch;
+  }
+  .end .links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 28px;
+    font-family: var(--mono);
+    font-size: 15px;
+    margin-top: 24px;
+    border-top: 1px solid var(--ink);
+    padding-top: 24px;
+  }
+  .end .links a {
+    color: var(--ink);
+    text-decoration: none;
+    border-bottom: 2px solid var(--ink);
+    padding: 6px 0;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .end .links a:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+  .end .arrow {
+    display: inline-block;
+    transform: translateY(-1px);
+    margin-left: 4px;
+  }
+
+  /* ============ FOOTER ============ */
+  footer {
+    border-top: 2px solid var(--ink);
+    padding: 22px 0 32px;
+    margin-top: 60px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--ink-mute);
+    letter-spacing: 0.04em;
+  }
+  footer .row {
+    display: flex;
+    justify-content: space-between;
+    gap: 18px;
+    flex-wrap: wrap;
+  }
+  footer a { color: var(--ink-mute); text-decoration: none; }
+  footer a:hover { color: var(--accent); }
+
+  /* utility */
+  code {
+    font-family: var(--mono);
+    font-size: 0.92em;
+    background: var(--bg-soft);
+    padding: 1px 6px;
+    border-radius: 0;
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <!-- ============ TOP BAR ============ -->
+  <div class="topbar">
+    <div class="row">
+      <a href="/" class="wm">contai<em>nix</em></a>
+      <div class="right">
+        <a href="https://github.com/atmask/containix">github</a>
+        <span>·</span>
+        <a href="https://pkg.go.dev/containix.dev">pkg.go.dev</a>
+        <span>·</span>
+        v0.1.0
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ HERO ============ -->
+  <header class="hero">
+    <div class="watermark">λ</div>
+    <h1>
+      <span class="strike">Build.</span> <span class="strike">Push.</span> <span class="strike">Pull.</span><br/>
+      <span class="accent">Reference.</span>
+    </h1>
+    <div class="sub">
+      <div>
+        <div class="meta">— What it is</div>
+        <p>
+          A containerd shim that runs Nix flakes as Kubernetes pods.
+          Your flake reference is the artifact. The shim assembles the rootfs at startup.
+        </p>
+      </div>
+      <div>
+        <div class="meta">— What it replaces</div>
+        <p>
+          The Dockerfile. The image build. The registry push. The layer cache.
+          The "works in CI, fails in prod" gap between them.
+        </p>
+      </div>
+    </div>
+  </header>
+
+  <!-- ============ § ANNOTATE ============ -->
+  <section class="spec">
+    <div class="text">
+      <div class="label">The pod spec</div>
+      <h2>One annotation. <span class="accent">That's the API.</span></h2>
+      <p>
+        Pods opt in with a <code>RuntimeClass</code>. The flake reference rides as an annotation.
+        The image field still exists because the OCI spec demands one — a 49-byte empty image satisfies the contract.
+      </p>
+      <p class="dim">
+        Containix reads the annotation, resolves the flake against your binary cache,
+        and bind-mounts the closure as the container's filesystem. <code>runc</code> sees a normal pod.
+      </p>
+    </div>
+    <pre class="listing"><span class="filename">pod.yaml</span>
+<span class="k">apiVersion:</span> <span class="s">v1</span>
+<span class="k">kind:</span> <span class="s">Pod</span>
+<span class="k">metadata:</span>
+  <span class="k">name:</span> <span class="s">my-app</span>
+  <span class="k">annotations:</span>
+    <span class="n">containix.dev/flake</span>:      <span class="s">"github:org/app#default"</span>
+    <span class="n">containix.dev/entrypoint</span>: <span class="s">"/bin/myapp"</span>
+<span class="k">spec:</span>
+  <span class="k">runtimeClassName:</span> <span class="s">containix</span>
+  <span class="k">containers:</span>
+  - <span class="k">name:</span> <span class="s">app</span>
+    <span class="k">image:</span> <span class="s">"containix/empty:1.0.0"</span>  <span class="c"># required, ignored</span></pre>
+  </section>
+
+  <!-- ============ § THE FLOW ============ -->
+  <section>
+    <div class="label">From annotation to running process</div>
+    <h2>Four steps. <span class="accent">No magic.</span></h2>
+
+    <div class="flow">
+      <div class="cell">
+        <div>
+          <div class="step">01 — Read</div>
+          <h3>Annotation</h3>
+        </div>
+        <p>The shim parses the flake reference and entrypoint from the pod's metadata.</p>
+      </div>
+      <div class="cell">
+        <div>
+          <div class="step">02 — Resolve</div>
+          <h3>Closure</h3>
+        </div>
+        <p>nix build returns store paths. The closure is fetched from the binary cache.</p>
+      </div>
+      <div class="cell">
+        <div>
+          <div class="step">03 — Assemble</div>
+          <h3>Rootfs</h3>
+        </div>
+        <p>Store paths are bind-mounted into a rootfs. An OCI spec is written alongside.</p>
+      </div>
+      <div class="cell">
+        <div>
+          <div class="step">04 — Run</div>
+          <h3>runc</h3>
+        </div>
+        <p>The shim hands off. Standard container lifecycle from here. Nothing exotic.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ § CLAIMS ============ -->
+  <section>
+    <div class="label">What you don't have to do anymore</div>
+    <h2>The pieces that <span class="accent">go away.</span></h2>
+
+    <div class="claims">
+      <div class="claim">
+        <div class="n">— 01</div>
+        <div class="h">Dockerfiles, <em>gone.</em></div>
+        <div class="d">Your flake describes the closure already. There's no second source of truth to maintain, no <code>RUN apk add</code> dance, no minus-one tag drift.</div>
+      </div>
+      <div class="claim">
+        <div class="n">— 02</div>
+        <div class="h">Registries, <em>optional.</em></div>
+        <div class="d">The closure comes from your binary cache. Cachix, Attic, S3, anything that speaks the Nix substituter protocol. Pods skip the registry-pull round trip.</div>
+      </div>
+      <div class="claim">
+        <div class="n">— 03</div>
+        <div class="h">Layer caches, <em>obsolete.</em></div>
+        <div class="d">Two pods on the same node sharing a library? They mount the same store path. One copy on disk. The kernel sorts the rest.</div>
+      </div>
+      <div class="claim">
+        <div class="n">— 04</div>
+        <div class="h">"Works in CI, fails in prod," <em>banished.</em></div>
+        <div class="d">Same flake lock at every stage. The closure you tested is the closure that runs. No build environment, no base image to drift.</div>
+      </div>
+      <div class="claim">
+        <div class="n">— 05</div>
+        <div class="h">Surprise binaries, <em>eliminated.</em></div>
+        <div class="d">The rootfs contains exactly what the closure declared. No shells, no package managers, no busybox you forgot was in there.</div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<!-- ============ STATUS (full-bleed) ============ -->
+<section class="status">
+  <div class="wrap">
+    <div class="inner">
+      <div class="label">Where it stands</div>
+      <h2>End-to-end. Early. <span style="color:var(--highlight);font-style:italic;">Pin commits.</span></h2>
+      <p>
+        Containix is consumable today as <code style="color:var(--highlight);background:transparent;padding:0;">packages.default</code> or a NixOS module.
+        Core packages sit at 91% test coverage. The shim has been driven on a NixOS VM and a local cluster.
+      </p>
+      <p>
+        The API will move before v1. If you depend on it, pin commits — not branches. File issues
+        ungracefully; the project would rather hear about them.
+      </p>
+    </div>
+  </div>
+</section>
+
+<div class="wrap">
+  <!-- ============ END ============ -->
+  <section class="end">
+    <h2>Read the source. <span style="color:var(--accent);font-style:italic;">Run the shim.</span></h2>
+    <div class="links">
+      <a href="https://github.com/atmask/containix">github.com/atmask/containix <span class="arrow">↗</span></a>
+      <a href="https://pkg.go.dev/containix.dev">pkg.go.dev/containix.dev <span class="arrow">↗</span></a>
+      <a href="https://github.com/atmask/containix/issues">Open an issue <span class="arrow">↗</span></a>
+    </div>
+  </section>
+
+  <!-- ============ FOOTER ============ -->
+  <footer>
+    <div class="row">
+      <div>© 2026 Ben Mask — Apache License 2.0</div>
+      <div>containix.dev — λ</div>
+    </div>
+  </footer>
+</div>
+
+</body>
+</html>
