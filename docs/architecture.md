@@ -68,21 +68,15 @@ On Create:
 
 Everything between "hand off" and "container running" is the standard runc shim path. Containix only modifies the spec; it doesn't replace the container lifecycle machinery.
 
-## Why a shim and not a snapshotter
+## Why a shim
 
-containerd's pluggable extension points include both **snapshotters** (which assemble the rootfs filesystem) and **shims** (which supervise the container process). Both can produce the same end result: a container running with Nix-sourced files. Tradeoffs:
+containerd exposes multiple pluggable extension points. The shim is the right one for containix because the work is per-container lifecycle, not just static filesystem preparation:
 
-| Aspect | Snapshotter approach | Shim approach (containix) |
-|---|---|---|
-| Integration point | Filesystem preparation | Container lifecycle |
-| Reuses | Standard runc shim | Standard snapshotter |
-| Modifies | Rootfs assembly | Spec generation, lifecycle hooks |
-| Conceptual claim | "The image IS Nix paths" | "The runtime supervises a Nix-rooted container" |
-| Lifecycle control | None — snapshotter is invoked only at prepare/cleanup | Full — every Task RPC is interceptable |
+- **Spec mutation at create time** — containix reads pod annotations, runs `nix build`, computes the closure, and rewrites the OCI spec before runc sees it.
+- **Lifecycle hooks** — every Task RPC (`Create`, `Start`, `Wait`, `Kill`, `Exec`, `Delete`) is interceptable. Useful for future features like GC roots tied to container lifecycle, custom exit handling, or per-container observability.
+- **Independent of the snapshotter layer** — containix works regardless of whether the node uses overlayfs, btrfs, ZFS, or any other snapshotter for the underlying image storage.
 
-Containix's shim approach allows for future per-container customization (custom Wait semantics, GC roots tied to container lifecycle, etc.) at the cost of being a bigger surface area than the snapshotter route.
-
-[nix-snapshotter](https://github.com/pdtpartners/nix-snapshotter) takes the snapshotter route — different design choice, more mature, used by Flox.
+The shim is the same extension point used by gVisor, Kata Containers, and other alternative container runtimes — well-supported, stable contract.
 
 ## The two TTRPC interfaces
 
