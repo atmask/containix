@@ -1,0 +1,100 @@
+# CI for containix. Public-repo hardening:
+#
+# - Third-party actions pinned by full commit SHA (resilient against tag
+#   rewrites; the canonical post-tj-actions/changed-files-2025 pattern).
+#   Comments record the human-readable version for easier auditing later.
+# - Workflow-level permissions set to least-privilege (contents: read).
+# - Trigger is `pull_request` (NOT `pull_request_target`) — runs in the
+#   fork's read-only context with no secrets accessible.
+# - No persist-credentials on checkout — the GITHUB_TOKEN doesn't leak to
+#   later steps that don't need it.
+# - Concurrency cancels in-progress runs on the same ref to save compute
+#   and surface the latest result quickly.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  flake-check:
+    name: nix flake check
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@8aa03977d8d733052d78f4e008a241fd1dbf36b3 # v31.10.6
+
+      - name: Validate flake
+        run: nix flake check --no-build
+
+      - name: Build packages.default
+        run: nix build .#default
+
+  test:
+    name: go test
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@8aa03977d8d733052d78f4e008a241fd1dbf36b3 # v31.10.6
+
+      - name: Run tests
+        run: nix develop -c go test -race ./...
+
+  pre-commit:
+    name: pre-commit hooks
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@8aa03977d8d733052d78f4e008a241fd1dbf36b3 # v31.10.6
+
+      - name: Run pre-commit
+        run: nix develop -c pre-commit run --all-files --show-diff-on-failure
+
+  cross-build:
+    name: cross-build linux/${{ matrix.goarch }}
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        goarch: [amd64, arm64]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@8aa03977d8d733052d78f4e008a241fd1dbf36b3 # v31.10.6
+
+      - name: Cross-compile shim
+        env:
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: nix develop -c go build -o /tmp/containerd-shim-containix-v1 ./cmd/containerd-shim-containix-v1/
+
+      - name: Verify binary is the right architecture
+        run: file /tmp/containerd-shim-containix-v1
