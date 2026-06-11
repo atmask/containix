@@ -145,7 +145,10 @@
 
             # Put the shim binary on containerd's PATH so it can resolve
             # runtime_type → containerd-shim-containix-v1 binary at exec time.
-            systemd.services.containerd.path = [ cfg.package ];
+            systemd.services.containerd.path = [ 
+              cfg.package 
+              pkgs.nix
+            ];
 
             # Also expose system-wide for ad-hoc operator commands like
             # `containerd-shim-containix-v1 -info` when debugging.
