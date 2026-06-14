@@ -8,7 +8,7 @@ import (
 	"github.com/containerd/containerd/v2/cmd/containerd-shim-runc-v2/manager"
 	"github.com/containerd/containerd/v2/pkg/shim"
 
-	_ "github.com/atmask/containix/pkg/shimservice"
+	_ "containix.dev/pkg/shimservice"
 )
 
 func main() {

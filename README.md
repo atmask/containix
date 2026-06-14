@@ -5,7 +5,7 @@
 <div align="center">
 
 [![CI](https://github.com/atmask/containix/actions/workflows/ci.yml/badge.svg)](https://github.com/atmask/containix/actions/workflows/ci.yml)
-[![Go Reference](https://pkg.go.dev/badge/github.com/atmask/containix.svg)](https://pkg.go.dev/github.com/atmask/containix)
+[![Go Reference](https://pkg.go.dev/badge/containix.dev.svg)](https://pkg.go.dev/containix.dev)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](./LICENSE)
 [![Nix Flake](https://img.shields.io/badge/nix-flake-blue?logo=nixos)](https://nixos.wiki/wiki/Flakes)
 

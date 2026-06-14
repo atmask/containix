@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/atmask/containix/pkg/nix"
+	"containix.dev/pkg/nix"
 	taskAPI "github.com/containerd/containerd/api/runtime/task/v3"
 	"github.com/containerd/ttrpc"
 )

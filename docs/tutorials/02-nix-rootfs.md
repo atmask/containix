@@ -307,7 +307,7 @@ import (
 
 	taskAPI "github.com/containerd/containerd/api/runtime/task/v3"
 
-	"github.com/atmask/containix/pkg/nix"
+	"containix.dev/pkg/nix"
 )
 
 type Service struct {
