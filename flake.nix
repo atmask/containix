@@ -34,12 +34,12 @@
                 mainProgram = "containerd-shim-containix-v1";
               };
             };
-            
-            # Emptry stub image generated so that containix consumers can pass
-            # a CRI compliant OCI image
+
+            # Empty stub image so containix consumers can pass a
+            # CRI-compliant OCI image reference in their pod specs.
             mkStubImage = architecture: pkgs.dockerTools.buildImage {
               name = "ghcr.io/atmask/containix-empty";
-              tag  = "0.1.0";
+              tag = "0.1.0";
               inherit architecture;
             };
           in
