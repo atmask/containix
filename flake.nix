@@ -34,10 +34,13 @@
                 mainProgram = "containerd-shim-containix-v1";
               };
             };
-
-            stubImage = pkgs.dockerTools.buildImage {
+            
+            # Emptry stub image generated so that containix consumers can pass
+            # a CRI compliant OCI image
+            mkStubImage = architecture: pkgs.dockerTools.buildImage {
               name = "ghcr.io/atmask/containix-empty";
               tag  = "0.1.0";
+              inherit architecture;
             };
           in
           {
@@ -93,6 +96,8 @@
             };
           } // pkgs.lib.optionalAttrs isLinux {
             packages.default = containixPkg;
+            packages.stub-image-amd64 = mkStubImage "amd64";
+            packages.stub-image-arm64 = mkStubImage "arm64";
           });
     in
     perSystem // {
