@@ -44,16 +44,21 @@ func (s *Service) Create(ctx context.Context, req *taskAPI.CreateTaskRequest) (*
 	}
 
 	if cfg != nil {
-		log.Printf("[containix] Nix flake detected: %s", cfg.FlakeRef)
+		log.Printf("[containix] Nix flake detected: %s (timeout=%s)", cfg.FlakeRef, cfg.Timeout)
 
-		storePath, err := nix.Build(cfg.FlakeRef)
+		// Both Build and Closure share a single timeout budget — if the
+		// build takes 110s of a 120s budget, closure only gets 10s. This
+		// matches operator intent: "this pod's creation must not exceed X."
+		nixCtx, cancel := context.WithTimeout(ctx, cfg.Timeout)
+		defer cancel()
+
+		storePath, err := nix.Build(nixCtx, cfg.FlakeRef)
 		if err != nil {
 			return nil, fmt.Errorf("nix build: %w", err)
 		}
-
 		log.Printf("[containix] store path: %s", storePath)
 
-		closure, err := nix.Closure(storePath)
+		closure, err := nix.Closure(nixCtx, storePath)
 		if err != nil {
 			return nil, fmt.Errorf("nix closure: %w", err)
 		}

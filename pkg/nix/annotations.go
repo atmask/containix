@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	ocispec "github.com/opencontainers/runtime-spec/specs-go"
 )
@@ -12,16 +13,32 @@ import (
 const (
 	AnnotationFlake         = "containix.dev/flake"
 	AnnotationEntrypoint    = "containix.dev/entrypoint"
-	AnnotationContainerType = "io.kubernetes.cri.container-type" // injected but CRI
+	AnnotationTimeout       = "containix.dev/timeout"            // e.g. "120s", "5m"
+	AnnotationContainerType = "io.kubernetes.cri.container-type" // injected by CRI
 )
+
+// DefaultBuildTimeout is the upper bound on a single Nix build invocation
+// when the pod doesn't override via the containix.dev/timeout annotation.
+// Tuned for "fetch a moderately sized closure from a binary cache" — too
+// short for first-time-on-node fresh builds, fine for cached pulls.
+const DefaultBuildTimeout = 2 * time.Minute
+
+// MaxBuildTimeout caps how long a single container can wait for Nix work,
+// regardless of what the pod requests. Prevents a misbehaving annotation
+// from holding a pod in ContainerCreating forever.
+const MaxBuildTimeout = 30 * time.Minute
 
 type ContainixConfig struct {
 	FlakeRef   string
 	Entrypoint string
+	// Timeout is the maximum time allowed for the combined Nix build +
+	// closure resolution for this container. Always populated; defaults to
+	// DefaultBuildTimeout and is clamped to MaxBuildTimeout.
+	Timeout time.Duration
 }
 
-// FromBundle reads the containix annotations from the OCI bundle's config.json
-// Returns nil if no containix annotations are present (passthrough to runc)
+// FromBundle reads the containix annotations from the OCI bundle's config.json.
+// Returns nil if no containix annotations are present (passthrough to runc).
 func FromBundle(bundlePath string) (*ContainixConfig, error) {
 	specPath := filepath.Join(bundlePath, "config.json")
 	data, err := os.ReadFile(specPath)
@@ -44,11 +61,32 @@ func FromBundle(bundlePath string) (*ContainixConfig, error) {
 		return nil, nil // not a containix container
 	}
 
-	entrypoint := spec.Annotations[AnnotationEntrypoint]
-
 	return &ContainixConfig{
 		FlakeRef:   flakeRef,
-		Entrypoint: entrypoint,
+		Entrypoint: spec.Annotations[AnnotationEntrypoint],
+		Timeout:    parseTimeout(spec.Annotations[AnnotationTimeout]),
 	}, nil
+}
 
+// parseTimeout decodes the containix.dev/timeout annotation.
+//
+//   - Empty/missing  → DefaultBuildTimeout
+//   - Invalid format → DefaultBuildTimeout (log-then-ignore; surfacing an
+//     error would block the container for a malformed string)
+//   - Zero / negative → DefaultBuildTimeout (a 0s timeout would always fail)
+//   - Above MaxBuildTimeout → clamped to MaxBuildTimeout
+//
+// Format follows Go's time.ParseDuration: "30s", "2m", "1h30m".
+func parseTimeout(raw string) time.Duration {
+	if raw == "" {
+		return DefaultBuildTimeout
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return DefaultBuildTimeout
+	}
+	if d > MaxBuildTimeout {
+		return MaxBuildTimeout
+	}
+	return d
 }

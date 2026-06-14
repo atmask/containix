@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	ocispec "github.com/opencontainers/runtime-spec/specs-go"
 )
@@ -158,6 +159,58 @@ func TestFromBundle_MissingConfigFile(t *testing.T) {
 	}
 	if cfg != nil {
 		t.Errorf("expected nil cfg on error, got %+v", cfg)
+	}
+}
+
+func TestFromBundle_DefaultTimeoutWhenAbsent(t *testing.T) {
+	bundle := writeSpec(t, ocispec.Spec{
+		Annotations: map[string]string{
+			AnnotationFlake: "nixpkgs#hello",
+		},
+	})
+
+	cfg, err := FromBundle(bundle)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Timeout != DefaultBuildTimeout {
+		t.Errorf("Timeout = %s, want default %s", cfg.Timeout, DefaultBuildTimeout)
+	}
+}
+
+func TestFromBundle_TimeoutParsing(t *testing.T) {
+	tests := []struct {
+		name     string
+		raw      string
+		expected time.Duration
+	}{
+		{"explicit seconds", "30s", 30 * time.Second},
+		{"explicit minutes", "5m", 5 * time.Minute},
+		{"compound under cap", "10m30s", 10*time.Minute + 30*time.Second},
+		{"empty falls back to default", "", DefaultBuildTimeout},
+		{"malformed falls back to default", "not a duration", DefaultBuildTimeout},
+		{"negative falls back to default", "-1s", DefaultBuildTimeout},
+		{"zero falls back to default", "0s", DefaultBuildTimeout},
+		{"above cap clamps to max", "1h30m", MaxBuildTimeout},
+		{"absurdly large clamps to max", "100h", MaxBuildTimeout},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			annotations := map[string]string{AnnotationFlake: "nixpkgs#hello"}
+			if tc.raw != "" {
+				annotations[AnnotationTimeout] = tc.raw
+			}
+			bundle := writeSpec(t, ocispec.Spec{Annotations: annotations})
+
+			cfg, err := FromBundle(bundle)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if cfg.Timeout != tc.expected {
+				t.Errorf("raw=%q: Timeout = %s, want %s", tc.raw, cfg.Timeout, tc.expected)
+			}
+		})
 	}
 }
 

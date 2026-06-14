@@ -56,7 +56,13 @@ spec:
       image: "ghcr.io/your-org/containix-empty:1.0.0"
 ```
 
-`containix.dev/entrypoint` is resolved relative to the flake's output store path (`bin/myapp` → `/nix/store/<hash>-myapp/bin/myapp`). Absolute paths starting with `/` are honored as-is.
+### Annotations
+
+| Annotation | Required | Default | Description |
+|---|---|---|---|
+| `containix.dev/flake` | yes | — | Flake reference to resolve. Any [flake URL Nix accepts](https://nix.dev/manual/nix/stable/command-ref/new-cli/nix3-flake#flake-references) (`github:org/repo#default`, `nixpkgs#hello`, `path:/local#out`). |
+| `containix.dev/entrypoint` | no | — | Path to the executable. Relative paths resolve against the flake's store path (`bin/myapp` → `/nix/store/<hash>-myapp/bin/myapp`). Absolute paths (`/...`) are used as-is. If omitted, the container runs whatever command the OCI spec already declares. |
+| `containix.dev/timeout` | no | `2m` | Maximum time for `nix build` + closure resolution. [Go duration format](https://pkg.go.dev/time#ParseDuration) (`30s`, `5m`, `1h`). Capped at `30m`. Invalid values fall back to the default. |
 
 ## Node requirements
 

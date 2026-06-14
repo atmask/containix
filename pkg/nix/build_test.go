@@ -1,9 +1,12 @@
 package nix
 
 import (
+	"context"
+	"errors"
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 )
 
 // requireNix skips the test if `nix` isn't on PATH. These tests integrate
@@ -24,7 +27,10 @@ func TestBuild_RealFlakeRef(t *testing.T) {
 
 	// nixpkgs#hello is the canonical smoke-test target: tiny closure (~5
 	// paths), available on cache.nixos.org, no compilation required.
-	storePath, err := Build("nixpkgs#hello")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	storePath, err := Build(ctx, "nixpkgs#hello")
 	if err != nil {
 		t.Fatalf("Build(nixpkgs#hello): %v", err)
 	}
@@ -36,7 +42,6 @@ func TestBuild_RealFlakeRef(t *testing.T) {
 		t.Errorf("storePath = %q, expected to contain \"hello\"", storePath)
 	}
 
-	// The path should actually exist after a successful build.
 	if _, err := exec.Command("test", "-d", storePath).CombinedOutput(); err != nil {
 		t.Errorf("store path does not exist on disk: %s", storePath)
 	}
@@ -45,22 +50,51 @@ func TestBuild_RealFlakeRef(t *testing.T) {
 func TestBuild_InvalidFlakeRef(t *testing.T) {
 	requireNix(t)
 
-	_, err := Build("github:does-not-exist/definitely-not-a-real-flake")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	_, err := Build(ctx, "github:does-not-exist/definitely-not-a-real-flake")
 	if err == nil {
 		t.Fatal("expected error for invalid flake ref, got nil")
+	}
+}
+
+func TestBuild_TimeoutKillsSubprocess(t *testing.T) {
+	requireNix(t)
+
+	// A 1-nanosecond deadline guarantees the context is expired before nix
+	// can do anything meaningful. We expect ErrTimeout, not a "real" error.
+	ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
+	defer cancel()
+
+	start := time.Now()
+	_, err := Build(ctx, "nixpkgs#hello")
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected timeout error, got nil")
+	}
+	if !errors.Is(err, ErrTimeout) {
+		t.Errorf("expected ErrTimeout, got %v", err)
+	}
+	// Should fail fast — not hang for the full nix-build time.
+	if elapsed > 10*time.Second {
+		t.Errorf("Build took %s; should have been killed quickly by ctx", elapsed)
 	}
 }
 
 func TestClosure_RealStorePath(t *testing.T) {
 	requireNix(t)
 
-	// First build something so we have a path with a known closure.
-	storePath, err := Build("nixpkgs#hello")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	storePath, err := Build(ctx, "nixpkgs#hello")
 	if err != nil {
 		t.Fatalf("Build setup: %v", err)
 	}
 
-	closure, err := Closure(storePath)
+	closure, err := Closure(ctx, storePath)
 	if err != nil {
 		t.Fatalf("Closure(%s): %v", storePath, err)
 	}
@@ -69,7 +103,6 @@ func TestClosure_RealStorePath(t *testing.T) {
 		t.Fatal("closure is empty; expected at least the path itself")
 	}
 
-	// A closure always includes the path it was queried for.
 	found := false
 	for _, p := range closure {
 		if p == storePath {
@@ -80,25 +113,15 @@ func TestClosure_RealStorePath(t *testing.T) {
 	if !found {
 		t.Errorf("closure of %s does not include itself; got %v", storePath, closure)
 	}
-
-	// hello's closure includes glibc. Sanity-check the closure is non-trivial.
-	foundGlibc := false
-	for _, p := range closure {
-		if strings.Contains(p, "glibc") {
-			foundGlibc = true
-			break
-		}
-	}
-	if !foundGlibc {
-		t.Logf("warning: closure does not include glibc; got %v", closure)
-		t.Log("This might be fine on some architectures, but is suspicious.")
-	}
 }
 
 func TestClosure_InvalidStorePath(t *testing.T) {
 	requireNix(t)
 
-	_, err := Closure("/nix/store/does-not-exist-no-such-path-zzzzzz")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	_, err := Closure(ctx, "/nix/store/does-not-exist-no-such-path-zzzzzz")
 	if err == nil {
 		t.Fatal("expected error for non-existent store path, got nil")
 	}
