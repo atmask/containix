@@ -1,0 +1,81 @@
+# Releases the stub OCI image. Fires on `containix-empty/v*` tag push.
+#
+# Example: `git tag -a containix-empty/v1.0.0 && git push --tags`
+#
+# The stub image is required because Kubernetes' CRI mandates an `image:`
+# field on every pod, even though containix overwrites the rootfs before
+# runc sees it. It changes essentially never; this workflow will run once
+# per major version, if that.
+#
+# Pushes per-arch images to ghcr.io and combines them into a multi-arch
+# manifest list so consumers can pull `ghcr.io/atmask/containix-empty:<v>`
+# from amd64 or arm64 nodes interchangeably.
+
+name: release stub image
+
+on:
+  push:
+    tags: ['containix-empty/v*']
+
+permissions:
+  contents: read
+
+jobs:
+  publish-stub-image:
+    name: stub image (multi-arch)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      # Required to push to ghcr.io via GITHUB_TOKEN.
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@8aa03977d8d733052d78f4e008a241fd1dbf36b3 # v31.10.6
+
+      - name: Compute version
+        id: tag
+        # strip "refs/tags/containix-empty/v" → "1.0.0"
+        run: echo "version=${GITHUB_REF#refs/tags/containix-empty/v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build per-arch stub images
+        run: |
+          nix build .#stub-image-amd64 -o result-amd64
+          nix build .#stub-image-arm64 -o result-arm64
+
+      - name: Login to ghcr.io
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" \
+            | nix run nixpkgs#crane -- auth login ghcr.io \
+                -u ${{ github.actor }} --password-stdin
+
+      - name: Push per-arch images
+        env:
+          BASE: ghcr.io/atmask/containix-empty
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          nix run nixpkgs#crane -- push result-amd64 "${BASE}:${VERSION}-amd64"
+          nix run nixpkgs#crane -- push result-arm64 "${BASE}:${VERSION}-arm64"
+
+      - name: Combine into multi-arch manifest list
+        env:
+          BASE: ghcr.io/atmask/containix-empty
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          # Tag the full semver (e.g. :1.0.0).
+          nix run nixpkgs#crane -- index append \
+            -m "${BASE}:${VERSION}-amd64" \
+            -m "${BASE}:${VERSION}-arm64" \
+            -t "${BASE}:${VERSION}"
+
+          # Also tag the major (e.g. :1) — consumers pin to this in pod
+          # specs so they get the latest patch within a major automatically.
+          MAJOR="${VERSION%%.*}"
+          nix run nixpkgs#crane -- index append \
+            -m "${BASE}:${VERSION}-amd64" \
+            -m "${BASE}:${VERSION}-arm64" \
+            -t "${BASE}:${MAJOR}"

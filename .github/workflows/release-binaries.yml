@@ -1,0 +1,63 @@
+# Releases the shim binary. Fires on `containix/v*` tag push.
+#
+# Example: `git tag -a containix/v0.1.0 && git push --tags`
+#
+# Builds per-arch shim binaries and attaches them as assets to the GitHub
+# release at the tag. Does NOT touch the stub OCI image — see
+# release-stub-image.yml for that.
+
+name: release binaries
+
+on:
+  push:
+    tags: ['containix/v*']
+
+permissions:
+  contents: read
+
+jobs:
+  release-binaries:
+    name: shim binary linux/${{ matrix.goarch }}
+    runs-on: ubuntu-24.04
+    permissions:
+      # Need write to upload assets to the GitHub Release.
+      contents: write
+    strategy:
+      matrix:
+        goarch: [amd64, arm64]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@8aa03977d8d733052d78f4e008a241fd1dbf36b3 # v31.10.6
+
+      - name: Compute version
+        id: tag
+        # strip "refs/tags/containix/v" → "0.1.0"
+        run: echo "version=${GITHUB_REF#refs/tags/containix/v}" >> "$GITHUB_OUTPUT"
+
+      - name: Cross-compile shim
+        env:
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          nix develop -c go build \
+            -o containerd-shim-containix-v1-linux-${{ matrix.goarch }} \
+            ./cmd/containerd-shim-containix-v1/
+
+      - name: Verify binary architecture
+        run: file ./containerd-shim-containix-v1-linux-${{ matrix.goarch }}
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          files: ./containerd-shim-containix-v1-linux-${{ matrix.goarch }}
+          name: containix ${{ steps.tag.outputs.version }}
+          tag_name: ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          fail_on_unmatched_files: true
