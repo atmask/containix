@@ -34,6 +34,11 @@
                 mainProgram = "containerd-shim-containix-v1";
               };
             };
+
+            stubImage = pkgs.dockerTools.buildImage {
+              name = "ghcr.io/atmask/containix-empty";
+              tag  = "0.1.0";
+            }
           in
           {
             devShells.default = pkgs.mkShell {
