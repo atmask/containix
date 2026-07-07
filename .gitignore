@@ -2,6 +2,7 @@
 bin/
 result
 result-*
+containerd-shim-containix-v1
 
 # direnv cache
 .direnv/
