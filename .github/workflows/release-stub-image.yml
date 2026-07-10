@@ -84,3 +84,11 @@ jobs:
             -m "${BASE}:${VERSION}-amd64" \
             -m "${BASE}:${VERSION}-arm64" \
             -t "${BASE}:${MAJOR}"
+
+          # And :latest — so an untagged `image: ghcr.io/atmask/containix-empty`
+          # still resolves (CRI defaults to :latest). Docs pin :<version>; this is
+          # just a convenience alias. Additive — the versioned tags above stand.
+          nix run nixpkgs#crane -- index append \
+            -m "${BASE}:${VERSION}-amd64" \
+            -m "${BASE}:${VERSION}-arm64" \
+            -t "${BASE}:latest"
