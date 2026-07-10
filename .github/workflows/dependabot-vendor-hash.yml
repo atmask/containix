@@ -1,0 +1,94 @@
+# Auto-fix the Nix buildGoModule `vendorHash` on Dependabot Go-module PRs.
+#
+# Why: `flake.nix` pins the vendored dependency set with a fixed `vendorHash`.
+# Dependabot bumps go.mod/go.sum but has no idea that hash exists, so every Go
+# dependency PR fails `nix flake check` with a hash mismatch. This recomputes the
+# hash and commits it back to the PR branch so the bump self-heals.
+#
+# Security posture: uses `pull_request_target` so the job runs with a writable
+# GITHUB_TOKEN (Dependabot-triggered `pull_request` runs get a read-only token
+# and can't push). It is gated to `dependabot[bot]` — a first-party actor that
+# only bumps versions — and only checks out / builds the PR head to recompute a
+# fixed-output hash. Do NOT broaden the actor gate: `pull_request_target` + write
+# token + checking out untrusted PR code is the classic privilege-escalation
+# footgun. It only touches go.mod/go.sum changes.
+name: dependabot vendorHash
+
+on:
+  pull_request_target:
+    paths:
+      - "go.mod"
+      - "go.sum"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependabot-vendorhash-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  fix-vendor-hash:
+    # First-party Dependabot PRs only. Never relax this.
+    if: ${{ github.actor == 'dependabot[bot]' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write # push the vendorHash fixup back to the PR branch
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          # Dependabot branches live in this repo, so head.repo == base repo.
+          ref: ${{ github.event.pull_request.head.ref }}
+          # Keep the token so we can push the fixup commit.
+          persist-credentials: true
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@8aa03977d8d733052d78f4e008a241fd1dbf36b3 # v31.10.6
+
+      - name: Recompute vendorHash
+        id: rehash
+        run: |
+          set -euo pipefail
+          FAKE="sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+
+          # 1. Force a mismatch so Nix prints the correct hash.
+          sed -i -E "s|vendorHash = \"sha256-[^\"]*\";|vendorHash = \"${FAKE}\";|" flake.nix
+
+          # 2. Build; capture the "got:" hash from the mismatch error.
+          set +e
+          build_out="$(nix build .#default --no-link 2>&1)"
+          set -e
+          got="$(printf '%s\n' "$build_out" \
+            | grep -oE 'got:[[:space:]]+sha256-[A-Za-z0-9+/=]+' \
+            | grep -oE 'sha256-[A-Za-z0-9+/=]+' | head -1)"
+
+          if [ -z "${got}" ]; then
+            echo "::notice::No hash mismatch found — vendorHash may already be correct, or the build failed for another reason."
+            printf '%s\n' "$build_out" | tail -40
+            # Restore the original file so we don't commit the fake hash.
+            git checkout -- flake.nix
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # 3. Write the real hash and confirm the build now succeeds.
+          sed -i -E "s|vendorHash = \"sha256-[^\"]*\";|vendorHash = \"${got}\";|" flake.nix
+          echo "New vendorHash: ${got}"
+          nix build .#default --no-link
+
+          if git diff --quiet flake.nix; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit and push fixup
+        if: ${{ steps.rehash.outputs.changed == 'true' }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add flake.nix
+          git commit -m "chore(nix): update vendorHash for dependency bump"
+          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
