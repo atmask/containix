@@ -23,7 +23,7 @@
 
 Instead of building, pushing, and pulling OCI images, containix lets you reference a Nix flake in your Pod spec. The shim resolves the flake, fetches the closure from your binary cache, assembles a rootfs from Nix store paths, and hands off to runc. Pods start with exactly the packages they need — nothing more.
 
-> **Status: experimental.** Validated end-to-end on NixOS aarch64 + k3s with ~91% test coverage across core packages. The API will change before v1; pin commits, not branches. Production use is not recommended yet.
+> **Status: experimental.** Validated end-to-end on NixOS aarch64 + k3s; the core Nix resolution logic (`pkg/nix`) is ~93% test-covered. The API will change before v1 — pin commits, not branches. Production use is not recommended yet. See [Limitations](#limitations-v010).
 
 ## How it works
 
@@ -47,21 +47,27 @@ kind: Pod
 metadata:
   name: my-app
   annotations:
-    containix.dev/flake: "github:myorg/myapp#default"
-    containix.dev/entrypoint: "bin/myapp"
+    # The flake is the single source of truth. If its default package declares
+    # meta.mainProgram, this is the only annotation you need.
+    containix.dev/flake: "github:myorg/myapp"
 spec:
   runtimeClassName: containix
   containers:
     - name: app
-      image: "ghcr.io/your-org/containix-empty:1.0.0"
+      image: "ghcr.io/atmask/containix-empty:0.1.0"
 ```
+
+containix resolves the entrypoint from the flake itself: a bare ref builds
+`packages.<system>.default`, and its [`meta.mainProgram`](https://nixos.org/manual/nixpkgs/stable/#var-meta-mainProgram)
+becomes the command. Override it with `containix.dev/entrypoint` only when you
+need a different binary — see below.
 
 ### Annotations
 
 | Annotation | Required | Default | Description |
 |---|---|---|---|
 | `containix.dev/flake` | yes | — | Flake reference to resolve. Any [flake URL Nix accepts](https://nix.dev/manual/nix/stable/command-ref/new-cli/nix3-flake#flake-references) (`github:org/repo#default`, `nixpkgs#hello`, `path:/local#out`). |
-| `containix.dev/entrypoint` | no | — | Path to the executable. Relative paths resolve against the flake's store path (`bin/myapp` → `/nix/store/<hash>-myapp/bin/myapp`). Absolute paths (`/...`) are used as-is. If omitted, the container runs whatever command the OCI spec already declares. |
+| `containix.dev/entrypoint` | no | `meta.mainProgram` | Overrides the executable. Relative paths resolve against the flake's store path (`bin/myapp` → `/nix/store/<hash>-myapp/bin/myapp`); absolute paths (`/...`) are used as-is. **If omitted, containix uses the default package's `meta.mainProgram`.** If neither is set, container creation fails with a clear error. |
 | `containix.dev/timeout` | no | `2m` | Maximum time for `nix build` + closure resolution. [Go duration format](https://pkg.go.dev/time#ParseDuration) (`30s`, `5m`, `1h`). Capped at `30m`. Invalid values fall back to the default. |
 
 ## Node requirements
@@ -95,14 +101,24 @@ The module installs the shim binary, configures containerd to register `runtime_
 
 ```bash
 sudo containerd config dump | grep -A 3 containix
+# nixpkgs#hello declares meta.mainProgram = "hello", so no entrypoint annotation
+# is needed — containix resolves and runs $out/bin/hello.
 sudo ctr run --rm \
   --runtime io.containerd.containix.v1 \
   --label containix.dev/flake="nixpkgs#hello" \
-  --label containix.dev/entrypoint="bin/hello" \
   docker.io/library/alpine:latest containix-smoke-test
 ```
 
 Non-NixOS deployments need to install the binary and configure containerd manually.
+
+## Limitations (v0.1.0)
+
+Experimental and intentionally minimal. Known gaps:
+
+- **Self-contained binaries only.** Nix binaries resolve their interpreter and libraries to `/nix/store` paths, so they run without an FHS layout — but programs that shell out to `/bin/sh`, rely on `#!/usr/bin/env`, or expect `/usr` and `/lib` aren't supported yet.
+- **No interactive tooling.** `kubectl exec` lands in a container without `sh`/`ls` on `PATH`.
+- **Policy is Kubernetes' job.** containix mirrors runc's options rather than enforcing its own — use PodSecurity admission for non-root/UID policy and NetworkPolicy for egress. It does not validate or allowlist flake refs.
+- **NixOS-first.** Non-NixOS nodes require installing the shim binary and configuring containerd manually.
 
 ## License
 
