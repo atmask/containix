@@ -30,20 +30,62 @@ func TestBuild_RealFlakeRef(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	storePath, err := Build(ctx, "nixpkgs#hello")
+	out, err := Build(ctx, "nixpkgs#hello")
 	if err != nil {
 		t.Fatalf("Build(nixpkgs#hello): %v", err)
 	}
 
-	if !strings.HasPrefix(storePath, "/nix/store/") {
-		t.Errorf("storePath = %q, want /nix/store/ prefix", storePath)
+	if !strings.HasPrefix(out.StorePath, "/nix/store/") {
+		t.Errorf("StorePath = %q, want /nix/store/ prefix", out.StorePath)
 	}
-	if !strings.Contains(storePath, "hello") {
-		t.Errorf("storePath = %q, expected to contain \"hello\"", storePath)
+	if !strings.Contains(out.StorePath, "hello") {
+		t.Errorf("StorePath = %q, expected to contain \"hello\"", out.StorePath)
+	}
+	// nixpkgs#hello declares meta.mainProgram = "hello"; Build must surface it.
+	if out.MainProgram != "hello" {
+		t.Errorf("MainProgram = %q, want \"hello\"", out.MainProgram)
 	}
 
-	if _, err := exec.Command("test", "-d", storePath).CombinedOutput(); err != nil {
-		t.Errorf("store path does not exist on disk: %s", storePath)
+	if _, err := exec.Command("test", "-d", out.StorePath).CombinedOutput(); err != nil {
+		t.Errorf("store path does not exist on disk: %s", out.StorePath)
+	}
+}
+
+// TestResolveEntrypoint exercises the three-tier waterfall directly. It's a
+// pure function (no Nix), so it runs even under -short.
+func TestResolveEntrypoint(t *testing.T) {
+	const store = "/nix/store/abc-hello"
+	tests := []struct {
+		name       string
+		entrypoint string
+		mainProg   string
+		want       string
+		wantErr    bool
+	}{
+		{"absolute path used as-is", "/usr/bin/env", "", "/usr/bin/env", false},
+		{"relative path joined to store", "bin/hello", "", "/nix/store/abc-hello/bin/hello", false},
+		{"mainProgram default", "", "hello", "/nix/store/abc-hello/bin/hello", false},
+		{"explicit entrypoint beats mainProgram", "bin/other", "hello", "/nix/store/abc-hello/bin/other", false},
+		{"nothing to resolve is an error", "", "", "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &ContainixConfig{FlakeRef: "nixpkgs#hello", Entrypoint: tt.entrypoint}
+			flake := FlakeOutput{StorePath: store, MainProgram: tt.mainProg}
+			got, err := resolveEntrypoint(cfg, flake)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got %q", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -89,14 +131,14 @@ func TestClosure_RealStorePath(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	storePath, err := Build(ctx, "nixpkgs#hello")
+	out, err := Build(ctx, "nixpkgs#hello")
 	if err != nil {
 		t.Fatalf("Build setup: %v", err)
 	}
 
-	closure, err := Closure(ctx, storePath)
+	closure, err := Closure(ctx, out.StorePath)
 	if err != nil {
-		t.Fatalf("Closure(%s): %v", storePath, err)
+		t.Fatalf("Closure(%s): %v", out.StorePath, err)
 	}
 
 	if len(closure) == 0 {
@@ -105,13 +147,13 @@ func TestClosure_RealStorePath(t *testing.T) {
 
 	found := false
 	for _, p := range closure {
-		if p == storePath {
+		if p == out.StorePath {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Errorf("closure of %s does not include itself; got %v", storePath, closure)
+		t.Errorf("closure of %s does not include itself; got %v", out.StorePath, closure)
 	}
 }
 

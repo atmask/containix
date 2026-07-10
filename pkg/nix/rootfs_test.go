@@ -46,7 +46,7 @@ func TestPrepareRootfs_AddsBindMounts(t *testing.T) {
 		Root:    &ocispec.Root{Path: "rootfs"},
 	})
 
-	err := PrepareRootfs(bundle, storePath, &ContainixConfig{
+	err := PrepareRootfs(bundle, FlakeOutput{StorePath: storePath}, &ContainixConfig{
 		FlakeRef:   "nixpkgs#hello",
 		Entrypoint: "bin/hello",
 	}, closure)
@@ -100,7 +100,8 @@ func TestPrepareRootfs_PreservesExistingMounts(t *testing.T) {
 		},
 	})
 
-	err := PrepareRootfs(bundle, "/nix/store/abc-hello", &ContainixConfig{
+	// No entrypoint annotation, so resolution falls to meta.mainProgram.
+	err := PrepareRootfs(bundle, FlakeOutput{StorePath: "/nix/store/abc-hello", MainProgram: "hello"}, &ContainixConfig{
 		FlakeRef: "nixpkgs#hello",
 	}, []string{"/nix/store/abc-hello"})
 	if err != nil {
@@ -122,7 +123,7 @@ func TestPrepareRootfs_RelativeEntrypoint(t *testing.T) {
 		Root:    &ocispec.Root{Path: "rootfs"},
 	})
 
-	err := PrepareRootfs(bundle, storePath, &ContainixConfig{
+	err := PrepareRootfs(bundle, FlakeOutput{StorePath: storePath}, &ContainixConfig{
 		FlakeRef:   "nixpkgs#hello",
 		Entrypoint: "bin/hello", // relative
 	}, []string{storePath})
@@ -146,7 +147,7 @@ func TestPrepareRootfs_AbsoluteEntrypoint(t *testing.T) {
 	})
 
 	absolute := "/nix/store/xyz-bash-5.2/bin/bash"
-	err := PrepareRootfs(bundle, "/nix/store/abc-hello", &ContainixConfig{
+	err := PrepareRootfs(bundle, FlakeOutput{StorePath: "/nix/store/abc-hello"}, &ContainixConfig{
 		FlakeRef:   "nixpkgs#hello",
 		Entrypoint: absolute,
 	}, []string{"/nix/store/abc-hello"})
@@ -160,31 +161,21 @@ func TestPrepareRootfs_AbsoluteEntrypoint(t *testing.T) {
 	}
 }
 
-func TestPrepareRootfs_EmptyEntrypointPreservesArgs(t *testing.T) {
-	// When no entrypoint annotation is provided, the OCI spec's existing
-	// Process.Args must be preserved (e.g., image default like /bin/sh).
-	original := []string{"/bin/sh", "-c", "echo hi"}
+func TestPrepareRootfs_NoEntrypointNoMainProgramErrors(t *testing.T) {
+	// With neither an entrypoint annotation nor meta.mainProgram, the three-tier
+	// waterfall has nothing to resolve. PrepareRootfs must error rather than
+	// silently leaving the image default — the flake is the source of truth.
 	bundle := writeSpec(t, ocispec.Spec{
-		Process: &ocispec.Process{Args: original},
+		Process: &ocispec.Process{Args: []string{"/bin/sh"}},
 		Root:    &ocispec.Root{Path: "rootfs"},
 	})
 
-	err := PrepareRootfs(bundle, "/nix/store/abc-hello", &ContainixConfig{
+	err := PrepareRootfs(bundle, FlakeOutput{StorePath: "/nix/store/abc-hello"}, &ContainixConfig{
 		FlakeRef:   "nixpkgs#hello",
-		Entrypoint: "", // unset
+		Entrypoint: "", // unset, and FlakeOutput has no MainProgram
 	}, []string{"/nix/store/abc-hello"})
-	if err != nil {
-		t.Fatalf("PrepareRootfs: %v", err)
-	}
-
-	spec := readSpec(t, bundle)
-	if len(spec.Process.Args) != len(original) {
-		t.Fatalf("Process.Args length = %d, want %d", len(spec.Process.Args), len(original))
-	}
-	for i, a := range original {
-		if spec.Process.Args[i] != a {
-			t.Errorf("Process.Args[%d] = %q, want %q", i, spec.Process.Args[i], a)
-		}
+	if err == nil {
+		t.Fatal("expected error when neither entrypoint nor mainProgram is set, got nil")
 	}
 }
 
@@ -198,7 +189,7 @@ func TestPrepareRootfs_PersistsToDisk(t *testing.T) {
 		Root:    &ocispec.Root{Path: "rootfs"},
 	})
 
-	err := PrepareRootfs(bundle, "/nix/store/abc-hello", &ContainixConfig{
+	err := PrepareRootfs(bundle, FlakeOutput{StorePath: "/nix/store/abc-hello"}, &ContainixConfig{
 		FlakeRef:   "nixpkgs#hello",
 		Entrypoint: "bin/hello",
 	}, []string{"/nix/store/abc-hello", "/nix/store/def-glibc"})
@@ -227,7 +218,7 @@ func TestPrepareRootfs_MissingConfigFile(t *testing.T) {
 	dir := t.TempDir()
 	// No config.json written — should error cleanly.
 
-	err := PrepareRootfs(dir, "/nix/store/abc-hello", &ContainixConfig{
+	err := PrepareRootfs(dir, FlakeOutput{StorePath: "/nix/store/abc-hello"}, &ContainixConfig{
 		FlakeRef: "nixpkgs#hello",
 	}, []string{"/nix/store/abc-hello"})
 	if err == nil {
@@ -241,7 +232,7 @@ func TestPrepareRootfs_MalformedJSON(t *testing.T) {
 		t.Fatalf("write config.json: %v", err)
 	}
 
-	err := PrepareRootfs(dir, "/nix/store/abc-hello", &ContainixConfig{
+	err := PrepareRootfs(dir, FlakeOutput{StorePath: "/nix/store/abc-hello"}, &ContainixConfig{
 		FlakeRef: "nixpkgs#hello",
 	}, []string{"/nix/store/abc-hello"})
 	if err == nil {
@@ -256,8 +247,9 @@ func TestPrepareRootfs_EmptyClosure(t *testing.T) {
 		Root:    &ocispec.Root{Path: "rootfs"},
 	})
 
-	err := PrepareRootfs(bundle, "/nix/store/abc-hello", &ContainixConfig{
-		FlakeRef: "nixpkgs#hello",
+	err := PrepareRootfs(bundle, FlakeOutput{StorePath: "/nix/store/abc-hello"}, &ContainixConfig{
+		FlakeRef:   "nixpkgs#hello",
+		Entrypoint: "bin/hello", // needed so resolution succeeds; test targets the empty closure
 	}, []string{})
 	if err != nil {
 		t.Fatalf("PrepareRootfs: %v", err)

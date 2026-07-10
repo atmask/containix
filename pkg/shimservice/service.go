@@ -52,19 +52,19 @@ func (s *Service) Create(ctx context.Context, req *taskAPI.CreateTaskRequest) (*
 		nixCtx, cancel := context.WithTimeout(ctx, cfg.Timeout)
 		defer cancel()
 
-		storePath, err := nix.Build(nixCtx, cfg.FlakeRef)
+		flakeOutput, err := nix.Build(nixCtx, cfg.FlakeRef)
 		if err != nil {
 			return nil, fmt.Errorf("nix build: %w", err)
 		}
-		log.Printf("[containix] store path: %s", storePath)
+		log.Printf("[containix] store path: %s; mainProgram: %s", flakeOutput.StorePath, flakeOutput.MainProgram)
 
-		closure, err := nix.Closure(nixCtx, storePath)
+		closure, err := nix.Closure(nixCtx, flakeOutput.StorePath)
 		if err != nil {
 			return nil, fmt.Errorf("nix closure: %w", err)
 		}
 		log.Printf("[containix] closure: %d paths", len(closure))
 
-		if err := nix.PrepareRootfs(req.Bundle, storePath, cfg, closure); err != nil {
+		if err := nix.PrepareRootfs(req.Bundle, flakeOutput, cfg, closure); err != nil {
 			return nil, fmt.Errorf("preparing rootfs: %w", err)
 		}
 	}

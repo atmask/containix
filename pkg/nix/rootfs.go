@@ -5,14 +5,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	ocispec "github.com/opencontainers/runtime-spec/specs-go"
 )
 
 // PrepareRootfs modifies the OCI bundle to mount the Nix store paths
 // and set the entrypoint.
-func PrepareRootfs(bundlePath string, storePath string, cfg *ContainixConfig, closurePaths []string) error {
+func PrepareRootfs(bundlePath string, flakeOutput FlakeOutput, cfg *ContainixConfig, closurePaths []string) error {
 	specPath := filepath.Join(bundlePath, "config.json")
 	data, err := os.ReadFile(specPath)
 	if err != nil {
@@ -40,13 +39,11 @@ func PrepareRootfs(bundlePath string, storePath string, cfg *ContainixConfig, cl
 	}
 
 	// Override entrypoint if specified
-	if cfg.Entrypoint != "" {
-		entrypoint := cfg.Entrypoint
-		if !strings.HasPrefix(entrypoint, "/") {
-			entrypoint = filepath.Join(storePath, entrypoint)
-		}
-		spec.Process.Args = []string{entrypoint}
+	entrypoint, err := resolveEntrypoint(cfg, flakeOutput)
+	if err != nil {
+		return fmt.Errorf("resolving entrypoint: %w", err)
 	}
+	spec.Process.Args = []string{entrypoint}
 
 	modified, err := json.Marshal(spec)
 	if err != nil {

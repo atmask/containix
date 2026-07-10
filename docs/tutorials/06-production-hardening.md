@@ -212,12 +212,36 @@ func Build(ctx context.Context, flakeRef string) (FlakeOutput, error) {
     }
     storePath := strings.TrimSpace(string(out))
 
-    // 2. Read meta.mainProgram — best-effort, empty if absent.
-    // The "or \"\"" pattern means "use the empty string if mainProgram isn't set."
+    // 2. Read meta.mainProgram off the flake's default package — best-effort.
+    //
+    // GOTCHA: the obvious form
+    //     nix eval --raw "<ref>.meta.mainProgram or \"\""
+    // does NOT work, and fails in a way that hides itself:
+    //   - `or` is Nix *language* syntax; it is not valid inside an
+    //     installable's attribute path.
+    //   - `<ref>.meta...` mis-parses — the flake-ref/attr separator is `#`,
+    //     not `.`, so `.meta` gets read as part of the ref.
+    // It errors every single time. Pair that with a swallowed error
+    // (metaOut, _ := ...) and mainProgram is silently always "" — a dead
+    // feature that still passes a naive "flake without mainProgram" test.
+    //
+    // Instead, pass the flake ref as the installable and use `--apply` to run
+    // a function over the resolved package, where `or ""` IS valid Nix. A bare
+    // ref resolves to packages.<system>.default, just like `nix build`. This
+    // yields a clean tri-state (verified against nixpkgs#hello / #zlib):
+    //     exit 0 + value  → mainProgram declared
+    //     exit 0 + ""     → package exists but declares no mainProgram
+    //     exit non-zero   → genuine failure (bad ref, no default package)
     metaCmd := exec.CommandContext(ctx, "nix", "eval", "--raw",
-        fmt.Sprintf(`%s.meta.mainProgram or ""`, flakeRef),
+        flakeRef, "--apply", `p: p.meta.mainProgram or ""`,
     )
-    metaOut, _ := metaCmd.Output()  // ignore errors; absent is fine
+    metaOut, err := metaCmd.Output()
+    if err != nil {
+        // Not "absent mainProgram" (that's exit 0 + "") — a real eval failure.
+        // The build already succeeded, so log and continue; resolveEntrypoint
+        // will emit a clear error if no entrypoint can be determined.
+        log.Printf("[containix] meta.mainProgram eval failed for %s: %v", flakeRef, err)
+    }
     mainProgram := strings.TrimSpace(string(metaOut))
 
     return FlakeOutput{StorePath: storePath, MainProgram: mainProgram}, nil
