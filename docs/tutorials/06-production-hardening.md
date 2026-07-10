@@ -219,7 +219,7 @@ func Build(ctx context.Context, flakeRef string) (FlakeOutput, error) {
     // does NOT work, and fails in a way that hides itself:
     //   - `or` is Nix *language* syntax; it is not valid inside an
     //     installable's attribute path.
-    //   - `<ref>.meta...` mis-parses — the flake-ref/attr separator is `#`,
+    //   - `<ref>.meta...` is misread — the flake-ref/attr separator is `#`,
     //     not `.`, so `.meta` gets read as part of the ref.
     // It errors every single time. Pair that with a swallowed error
     // (metaOut, _ := ...) and mainProgram is silently always "" — a dead
