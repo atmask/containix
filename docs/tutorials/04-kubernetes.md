@@ -43,6 +43,10 @@ sudo tee -a /etc/containerd/config.toml <<EOF
 
 [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.containix]
   runtime_type = "io.containerd.containix.v1"
+  # CRI drops custom annotations unless opted in here — without this the pod's
+  # containix.dev/flake annotation never reaches the shim.
+  pod_annotations = ["containix.dev/*"]
+  container_annotations = ["containix.dev/*"]
   [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.containix.options]
     SystemdCgroup = true
 EOF
@@ -64,6 +68,10 @@ sudo tee -a /var/lib/rancher/k3s/agent/etc/containerd/config.toml.tmpl <<'EOF'
 
 [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.containix]
   runtime_type = "io.containerd.containix.v1"
+  # CRI drops custom annotations unless opted in here — without this the pod's
+  # containix.dev/flake annotation never reaches the shim.
+  pod_annotations = ["containix.dev/*"]
+  container_annotations = ["containix.dev/*"]
   [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.containix.options]
     SystemdCgroup = true
 EOF

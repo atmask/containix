@@ -23,11 +23,16 @@ Pod (runtimeClassName: containix)
                  └─ nix build <flake> → mount closure → runc
 ```
 
-Two things have to line up on **every node that runs containix pods**:
+Three things have to line up on **every node that runs containix pods**:
 
 1. The **shim binary** is on containerd's `PATH`, and containerd has the runtime
    registered (`runtimes.containix`).
-2. A **Nix daemon** is available so the shim can resolve and build flakes.
+2. That runtime **passes `containix.dev/*` annotations through to the OCI spec**.
+   CRI drops custom annotations by default, so without this the shim never sees
+   the flake reference and the pod silently runs nothing — the most common
+   "applied it, but the flake didn't run" cause. The NixOS module configures this
+   for you; the manual path sets it explicitly (below).
+3. A **Nix daemon** is available so the shim can resolve and build flakes.
 
 If those aren't in place, pods sit in `ContainerCreating` — a green `kubectl
 apply` of the RuntimeClass alone does nothing. Prep the nodes first.
@@ -116,6 +121,11 @@ sudo tee -a /etc/containerd/config.toml <<'EOF'
 
 [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.containix]
   runtime_type = "io.containerd.containix.v1"
+  # Required: CRI drops custom annotations unless opted in here. Without this the
+  # pod's containix.dev/flake annotation never reaches the shim and the flake
+  # silently never runs. (Keys must precede the [...options] table below.)
+  pod_annotations = ["containix.dev/*"]
+  container_annotations = ["containix.dev/*"]
   [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.containix.options]
     SystemdCgroup = true   # set to match your cluster's cgroup driver
 EOF
@@ -219,7 +229,7 @@ journalctl -u containerd | grep containix
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | No `[containix]` lines at all | RuntimeClass `handler` ≠ registered runtime name, or pod not scheduled on a prepared node | Match `handler` to `runtimeName`; check `nodeSelector` / node labels |
-| `Create called` but nothing after | `--label`/annotation not reaching the shim, or shim treats it as non-containix | Confirm the `containix.dev/flake` annotation is present on the container |
+| `Create called` but no `Nix flake detected` | Annotation not reaching the shim — CRI annotation passthrough not configured for this runtime | Add `pod_annotations = ["containix.dev/*"]` to the `runtimes.containix` block and restart containerd |
 | Stops after `Nix flake detected` | `nix build` slow, cache unreachable, or bad flake ref | Test `sudo nix build <ref>` on the node; raise `containix.dev/timeout`; check cache reachability |
 | `no entrypoint resolved` error | Flake has no `meta.mainProgram` and no `entrypoint` annotation | Add `containix.dev/entrypoint`, or set `meta.mainProgram` in the flake |
 | Image pull error | Stub image not pullable | Use a reachable image (any small one works; contents are ignored) |

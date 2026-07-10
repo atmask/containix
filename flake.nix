@@ -149,8 +149,19 @@
             # looks like:
             #   [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.containix]
             #     runtime_type = "io.containerd.containix.v1"
+            #     pod_annotations = ["containix.dev/*"]
+            #     container_annotations = ["containix.dev/*"]
             virtualisation.containerd.settings.plugins."io.containerd.grpc.v1.cri".containerd.runtimes.${cfg.runtimeName} = {
               runtime_type = cfg.runtimeType;
+
+              # CRI drops custom annotations before they reach the OCI runtime
+              # spec unless each glob is opted in here. Without this, the pod's
+              # containix.dev/flake annotation never reaches the shim (FromBundle
+              # sees nothing → passthrough to runc → the flake silently never
+              # runs). Pod-level covers annotations set on Pod metadata (the
+              # documented form); container-level covers per-container use.
+              pod_annotations = [ "containix.dev/*" ];
+              container_annotations = [ "containix.dev/*" ];
             };
 
             # Put the shim binary on containerd's PATH so it can resolve
