@@ -479,13 +479,14 @@
 <span class="k">metadata:</span>
   <span class="k">name:</span> <span class="s">my-app</span>
   <span class="k">annotations:</span>
-    <span class="n">containix.dev/flake</span>:      <span class="s">"github:org/app#default"</span>
-    <span class="n">containix.dev/entrypoint</span>: <span class="s">"/bin/myapp"</span>
+    <span class="c"># the flake is the only thing you specify —</span>
+    <span class="c"># its meta.mainProgram becomes the entrypoint</span>
+    <span class="n">containix.dev/flake</span>: <span class="s">"github:org/app"</span>
 <span class="k">spec:</span>
   <span class="k">runtimeClassName:</span> <span class="s">containix</span>
   <span class="k">containers:</span>
   - <span class="k">name:</span> <span class="s">app</span>
-    <span class="k">image:</span> <span class="s">"containix/empty:1.0.0"</span>  <span class="c"># required, ignored</span></pre>
+    <span class="k">image:</span> <span class="s">"ghcr.io/atmask/containix-empty:0.1.0"</span>  <span class="c"># required, ignored</span></pre>
   </section>
 
   <!-- ============ § THE FLOW ============ -->
@@ -499,7 +500,7 @@
           <div class="step">01 — Read</div>
           <h3>Annotation</h3>
         </div>
-        <p>The shim parses the flake reference and entrypoint from the pod's metadata.</p>
+        <p>The shim parses the flake reference from the pod's metadata. The entrypoint comes from the flake's <code>meta.mainProgram</code> — or an optional override annotation.</p>
       </div>
       <div class="cell">
         <div>
@@ -568,7 +569,7 @@
       <h2>End-to-end. Early. <span style="color:var(--highlight);font-style:italic;">Pin commits.</span></h2>
       <p>
         Containix is consumable today as <code style="color:var(--highlight);background:transparent;padding:0;">packages.default</code> or a NixOS module.
-        Core packages sit at 91% test coverage. The shim has been driven on a NixOS VM and a local cluster.
+        The core Nix package sits at ~93% test coverage. The shim has been driven on a NixOS VM and a local cluster.
       </p>
       <p>
         The API will move before v1. If you depend on it, pin commits — not branches. File issues
