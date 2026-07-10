@@ -322,7 +322,20 @@ Without `meta.mainProgram` support, pod specs have to know the binary name. That
 
 ## Step 5: Security
 
+> **containix status:** of the hardening ideas below, only *read-only store mounts*
+> is implemented. The rest were evaluated and **deliberately declined for v0.1.0**
+> (see the per-item notes). Guiding principle: containix is a runtime that mirrors
+> runc's options; cluster-level policy — PodSecurity, NetworkPolicy, admission —
+> is the operator's to configure, not the shim's to silently enforce.
+
 ### Restrict Nix evaluation
+
+> **⛔ Declined (the IFD flag).** The lock-file flags below are already in
+> `pkg/nix/build.go`, but `--no-allow-import-from-derivation` was dropped:
+> disabling IFD is redundant with flakes' default *pure evaluation*, removes no
+> capability an attacker lacks (a malicious flake builds arbitrary *sandboxed*
+> derivations through the front door regardless), and — if ever wanted — belongs
+> at the operator/node level (`nix.conf`), not a per-pod annotation a tenant can flip.
 
 Nix evaluation is Turing-complete and can make network requests. Restrict it:
 
@@ -338,6 +351,13 @@ cmd := exec.Command("nix", "build",
 ```
 
 ### Validate flake references
+
+> **⛔ Declined.** An allowlist is admission-control's job and needs config the
+> shim doesn't own. A denylist is largely theater here: SSRF-to-an-IP is already
+> baseline Kubernetes (image pulls hit arbitrary hosts, blind) and can't be
+> reliably string-matched — that's a network-layer control (NetworkPolicy,
+> IMDSv2). Path-traversal / local-FS refs are PodSecurity's domain. containix
+> stays a runtime, not a policy engine.
 
 Don't allow arbitrary flake refs. An admission webhook or the shim itself should validate:
 
@@ -355,9 +375,17 @@ func ValidateFlakeRef(ref string) error {
 
 ### Read-only store mounts
 
+> **✅ Implemented.** Every closure path is bind-mounted `ro` in `pkg/nix/rootfs.go`.
+
 All Nix store paths are mounted `ro` (read-only). The container cannot modify its own rootfs, which is a security win over writable overlay filesystems.
 
 ### Run as non-root
+
+> **⛔ Declined.** Silently rewriting UID 0 → 65534 breaks the "same options as
+> runc" contract: the shim can't distinguish a deliberate `runAsUser: 0` from a
+> defaulted one, `nobody` may not even be runnable, and enforcement is
+> PodSecurityAdmission's job. containix passes `Process.User` through untouched —
+> the correct, non-enforcing behavior.
 
 The container process should run as a non-root user. This is configured in the OCI spec (and can be enforced by the shim):
 
