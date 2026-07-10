@@ -12,6 +12,7 @@
 **A containerd shim that runs Nix flakes directly on Kubernetes — no container images required.**
 
 [Pod spec](#pod-spec) •
+[Kubernetes guide](docs/kubernetes.md) •
 [Installation](#installation-nixos) •
 [Architecture](docs/architecture.md) •
 [Contributing](CONTRIBUTING.md) •
@@ -79,6 +80,10 @@ need a different binary — see below.
 
 ## Installation (NixOS)
 
+> This is the NixOS quickstart. For the full deployment guide — non-NixOS nodes,
+> managed clusters (EKS/GKE), k3s, the `RuntimeClass`, and troubleshooting — see
+> **[Running containix on Kubernetes](docs/kubernetes.md)**.
+
 Add containix as a flake input and enable the module:
 
 ```nix
@@ -97,16 +102,16 @@ Add containix as a flake input and enable the module:
 }
 ```
 
-The module installs the shim binary, configures containerd to register `runtime_type = "io.containerd.containix.v1"`, and ensures `runc` and `nix` are on containerd's PATH. After `nixos-rebuild switch`:
+The module installs the shim binary, configures containerd to register `runtime_type = "io.containerd.containix.v1"`, and ensures `runc` and `nix` are on containerd's PATH. After `nixos-rebuild switch`, smoke-test the node (`ctr` doesn't auto-pull, so pull the ignored stub image first):
 
 ```bash
-sudo containerd config dump | grep -A 3 containix
 # nixpkgs#hello declares meta.mainProgram = "hello", so no entrypoint annotation
 # is needed — containix resolves and runs $out/bin/hello.
+sudo ctr image pull docker.io/library/busybox:latest
 sudo ctr run --rm \
   --runtime io.containerd.containix.v1 \
   --label containix.dev/flake="nixpkgs#hello" \
-  docker.io/library/alpine:latest containix-smoke-test
+  docker.io/library/busybox:latest containix-smoke-test
 ```
 
 Non-NixOS deployments need to install the binary and configure containerd manually.
