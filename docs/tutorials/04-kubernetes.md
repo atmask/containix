@@ -54,38 +54,42 @@ EOF
 sudo systemctl restart containerd
 ```
 
+> **Config version matters.** The block above uses the **config-version 2** plugin
+> key (`io.containerd.grpc.v1.cri`), which containerd 2.x still accepts. On a node
+> using **config version 3** (the default on many recent containerd-2.x distros,
+> including EKS/GKE nodes), use
+> `[plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.containix]` instead —
+> same fields. Check with `grep '^version' /etc/containerd/config.toml`.
+
 ### Configure containerd — k3s
 
-k3s regenerates its containerd config (`/var/lib/rancher/k3s/agent/etc/containerd/config.toml`) on every start, so direct edits get overwritten. Use the template extension:
+k3s regenerates its containerd config on every start, so direct edits get
+overwritten — use a **template** instead. Modern k3s (containerd 2.x) reads
+`config-v3.toml.tmpl` and uses the config-version-3 plugin key
+(`io.containerd.cri.v1.runtime`). Begin the template with `{{ template "base" . }}`
+to inherit k3s's base config, then append the runtime block:
 
 ```bash
-# Seed the template from the current rendered config the first time
-sudo cp /var/lib/rancher/k3s/agent/etc/containerd/config.toml \
-        /var/lib/rancher/k3s/agent/etc/containerd/config.toml.tmpl
+sudo tee /var/lib/rancher/k3s/agent/etc/containerd/config-v3.toml.tmpl <<'EOF'
+{{ template "base" . }}
 
-# Append the containix runtime block
-sudo tee -a /var/lib/rancher/k3s/agent/etc/containerd/config.toml.tmpl <<'EOF'
-
-[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.containix]
+[plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.containix]
   runtime_type = "io.containerd.containix.v1"
-  # CRI drops custom annotations unless opted in here — without this the pod's
-  # containix.dev/flake annotation never reaches the shim.
   pod_annotations = ["containix.dev/*"]
   container_annotations = ["containix.dev/*"]
-  [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.containix.options]
-    SystemdCgroup = true
 EOF
 
 sudo systemctl restart k3s
 ```
 
-After restart, verify:
+The shim, `nix`, and `runc` must also be on k3s's service `PATH` so its embedded
+containerd can exec the shim (on NixOS: `systemd.services.k3s.path`).
+
+After restart, verify the block rendered into the live config:
 
 ```bash
-grep -A 3 containix /var/lib/rancher/k3s/agent/etc/containerd/config.toml
+grep -A3 runtimes.containix /var/lib/rancher/k3s/agent/etc/containerd/config.toml
 ```
-
-The block should be present in the rendered file.
 
 ### EKS / GKE / managed Kubernetes
 

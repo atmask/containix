@@ -5,10 +5,10 @@ want the step-by-step teaching version, see
 [tutorials/04-kubernetes.md](./tutorials/04-kubernetes.md); this page is the
 condensed "get it running" path.
 
-> **Status (v0.1.0):** experimental. The NixOS path below is the one that's been
-> validated end-to-end. Everything here is `kubectl apply` + node prep — there is
-> **no Helm chart, operator, or node-installer DaemonSet yet** (see
-> [Roadmap](#roadmap)).
+> **Status (v0.1.0):** experimental. Validated end-to-end on NixOS — both the
+> system containerd (via `ctr`) and single-node k3s (via `kubectl`), containerd
+> 2.x. Everything here is `kubectl apply` + node prep — there is **no Helm chart,
+> operator, or node-installer DaemonSet yet** (see [Roadmap](#roadmap)).
 
 ## The mental model (read this first)
 
@@ -53,14 +53,61 @@ apply` of the RuntimeClass alone does nothing. Prep the nodes first.
 Use a **dedicated, labeled node group** rather than every node. It keeps the
 blast radius small and lets `nodeSelector` route only opted-in pods there.
 
-### Option A — NixOS (recommended, validated)
+Every containix node needs the same three things, on any distro:
 
-Add containix as a flake input and enable the module on the node(s):
+1. **A Nix daemon** (multi-user install provides the daemon):
+   ```bash
+   curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh
+   ```
+2. **The shim binary** on containerd's `PATH` (`/usr/local/bin` is fine):
+   ```bash
+   # build it:  nix build github:atmask/containix#default    (result/bin/…)
+   # or grab the release asset for your arch:
+   #   https://github.com/atmask/containix/releases
+   sudo cp containerd-shim-containix-v1 /usr/local/bin/
+   ```
+3. **The runtime registered** in containerd's CRI config — see the next section.
+
+The distros differ only in *how* those land on the node (below). NixOS automates
+all three; everything else you do by hand or bake into a node image.
+
+### The runtime block (same on every distro)
+
+You add one runtime block to containerd's CRI config. It's identical everywhere —
+only the containerd **config version** changes the plugin key:
+
+```toml
+# config version 3 — containerd 2.x (EKS, GKE, kubeadm, k3s on recent nodes)
+[plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.containix]
+  runtime_type = "io.containerd.containix.v1"
+  pod_annotations = ["containix.dev/*"]        # REQUIRED — CRI drops custom
+  container_annotations = ["containix.dev/*"]  # annotations without these, so the
+                                               # shim never sees the flake ref and
+                                               # the pod silently runs nothing.
+```
+
+```toml
+# config version 2 — containerd 1.x (2.x still accepts it)
+[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.containix]
+  runtime_type = "io.containerd.containix.v1"
+  pod_annotations = ["containix.dev/*"]
+  container_annotations = ["containix.dev/*"]
+```
+
+Check your version with `grep -E '^version' /etc/containerd/config.toml` (or the
+file named in `systemctl cat containerd`). The `pod_annotations` /
+`container_annotations` globs are the part everyone forgets — they are mandatory.
+If your cluster uses the systemd cgroup driver, also add `SystemdCgroup = true`
+under a `.options` sub-table of the runtime.
+
+### Getting the block onto your nodes
+
+**NixOS — easiest, and the validated path.** The module does all three requirements
+(runtime + passthrough, containerd enabled, shim/`nix`/`runc` on PATH):
 
 ```nix
 {
   inputs.containix.url = "github:atmask/containix";
-
   outputs = inputs @ { nixpkgs, containix, ... }: {
     nixosConfigurations.your-node = nixpkgs.lib.nixosSystem {
       modules = [
@@ -73,78 +120,50 @@ Add containix as a flake input and enable the module on the node(s):
 }
 ```
 
-The module:
-
-- enables `virtualisation.containerd`,
-- registers the runtime as `runtimes.containix` with
-  `runtime_type = "io.containerd.containix.v1"`,
-- puts the shim, `nix`, and `runc` on containerd's `PATH`.
-
-The registered name comes from `services.containix.runtimeName` (default
-`containix`) — **this is the value your `RuntimeClass` `handler` must match.**
-`runtimeType` (default `io.containerd.containix.v1`) is the containerd
-`runtime_type`.
-
-After `nixos-rebuild switch`, verify and smoke-test the node directly (no
-Kubernetes needed):
+The `RuntimeClass` `handler` must equal `services.containix.runtimeName` (default
+`containix`). After `nixos-rebuild switch`, smoke-test the node directly:
 
 ```bash
-sudo containerd config dump | grep -A2 runtimes.containix
-
 sudo ctr image pull docker.io/library/busybox:latest
-sudo ctr run --rm \
-  --runtime io.containerd.containix.v1 \
+sudo ctr run --rm --runtime io.containerd.containix.v1 \
   --label containix.dev/flake="nixpkgs#hello" \
-  docker.io/library/busybox:latest containix-check
-# → prints: Hello, world!
+  docker.io/library/busybox:latest containix-check    # → Hello, world!
 ```
 
-(`nixpkgs#hello` declares `meta.mainProgram`, so no entrypoint annotation is
-needed — the shim resolves it. See [Annotations](#annotations).)
+(Heads-up: on NixOS `containerd config dump` reads the *default* config path, not
+the daemon's `--config` store path, so it can misleadingly show no containix
+runtime — trust the `ctr` test.)
 
-### Option B — non-NixOS (manual)
+**Self-managed containerd — kubeadm, bare metal, self-managed cloud node AMIs.**
+Append the [runtime block](#the-runtime-block-same-on-every-distro) to
+`/etc/containerd/config.toml` (or a drop-in under `/etc/containerd/config.toml.d/`),
+then `sudo systemctl restart containerd`.
 
-Less turnkey, but works on any containerd node:
+**k3s.** k3s *regenerates* its containerd config on start, so add a template rather
+than editing the rendered file. Modern k3s reads `config-v3.toml.tmpl`; begin it
+with `{{ template "base" . }}` to inherit the base config, then append the block:
 
-```bash
-# 1. Install Nix (multi-user; provides the daemon)
-curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh
+```toml
+# /var/lib/rancher/k3s/agent/etc/containerd/config-v3.toml.tmpl
+{{ template "base" . }}
 
-# 2. Install the shim binary onto containerd's PATH
-#    - build it:   nix build github:atmask/containix#default   (result/bin/…)
-#    - or download the release asset for your arch from
-#      https://github.com/atmask/containix/releases
-sudo cp containerd-shim-containix-v1 /usr/local/bin/
-
-# 3. Register the runtime in containerd
-sudo tee -a /etc/containerd/config.toml <<'EOF'
-
-[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.containix]
+[plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.containix]
   runtime_type = "io.containerd.containix.v1"
-  # Required: CRI drops custom annotations unless opted in here. Without this the
-  # pod's containix.dev/flake annotation never reaches the shim and the flake
-  # silently never runs. (Keys must precede the [...options] table below.)
   pod_annotations = ["containix.dev/*"]
   container_annotations = ["containix.dev/*"]
-  [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.containix.options]
-    SystemdCgroup = true   # set to match your cluster's cgroup driver
-EOF
-
-sudo systemctl restart containerd
 ```
 
-**k3s** regenerates its containerd config on start, so edit the template instead
-of `config.toml` directly (seed `config.toml.tmpl` from the rendered config, then
-append the same `runtimes.containix` block, then `systemctl restart k3s`). Full
-steps are in [tutorial 04](./tutorials/04-kubernetes.md#configure-containerd--k3s).
+`systemctl restart k3s`, then confirm it rendered: `grep -A3 runtimes.containix
+/var/lib/rancher/k3s/agent/etc/containerd/config.toml`. The shim/`nix`/`runc` must
+also be on k3s's service `PATH` (`systemd.services.k3s.path` on NixOS) so its
+embedded containerd can exec the shim.
 
-### Managed clusters (EKS, GKE, and friends)
-
-You only control nodes through their image / user-data, so bake **Nix + the shim
-binary + the containerd runtime block** into a custom node image (or a
-`cloud-init`/bootstrap script) for a dedicated node group. This is the hardest
-path today — there is no node-installer to do it for you. Pre-populating the Nix
-store with common closures in the image also helps first-pod cold starts.
+**Managed node groups — EKS, GKE, and similar.** You can't edit a running managed
+node's config, so apply the three requirements at **node bootstrap**: either bake
+Nix + the shim + the runtime block into a custom node image / launch-template
+user-data, or run a privileged **DaemonSet** that installs them and restarts
+containerd. Pre-seeding the Nix store with common closures in the image also cuts
+first-pod cold starts. This is the heaviest path — there's no node-installer yet.
 
 ### Label the nodes
 
@@ -211,14 +230,18 @@ kubectl get pod containix-hello -w
 ## Verify
 
 ```bash
+# Primary success signal — the flake's own output:
+kubectl logs containix-hello                # e.g. "Hello, world!"
+
 kubectl describe pod containix-hello        # events: scheduling, runtime, errors
 
-# On the node — the shim's own breadcrumbs:
-journalctl -u containerd | grep containix
-#   [containix] Create called: id=...
+# On the node — the shim's breadcrumbs, under whichever unit owns containerd:
+#   system containerd:  journalctl -u containerd | grep containix
+#   k3s (embedded):     journalctl -u k3s        | grep containix
 #   [containix] Nix flake detected: nixpkgs#hello
 #   [containix] store path: /nix/store/...-hello-2.12.3
-#   [containix] closure: 5 paths
+# (Under k3s the shim's stdout may not reach the journal — kubectl logs is the
+#  more reliable signal.)
 ```
 
 ## Troubleshooting
