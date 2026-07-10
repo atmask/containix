@@ -58,8 +58,13 @@ jobs:
           BASE: ghcr.io/atmask/containix-empty
           VERSION: ${{ steps.tag.outputs.version }}
         run: |
-          nix run nixpkgs#crane -- push result-amd64 "${BASE}:${VERSION}-amd64"
-          nix run nixpkgs#crane -- push result-arm64 "${BASE}:${VERSION}-arm64"
+          # dockerTools.buildImage emits a gzip-compressed docker-save tarball, but
+          # `crane push` reads a raw tar — decompress first, or it fails with
+          # "archive/tar: invalid tar header" on the gzip magic bytes.
+          gunzip -c result-amd64 > image-amd64.tar
+          gunzip -c result-arm64 > image-arm64.tar
+          nix run nixpkgs#crane -- push image-amd64.tar "${BASE}:${VERSION}-amd64"
+          nix run nixpkgs#crane -- push image-arm64.tar "${BASE}:${VERSION}-arm64"
 
       - name: Combine into multi-arch manifest list
         env:

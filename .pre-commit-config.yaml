@@ -55,10 +55,15 @@ repos:
         language: system
         types: [shell]
 
-  # Typo detection
-  - repo: https://github.com/crate-ci/typos
-    rev: v1.24.6
+  # Typo detection. Use the dev shell's typos (nixpkgs) rather than the upstream
+  # repo hook, which installs a prebuilt generic-linux binary that can't run on
+  # NixOS. CI runs pre-commit inside `nix develop`, so typos is on PATH there too.
+  - repo: local
     hooks:
       - id: typos
+        name: typos
+        entry: typos
+        language: system
+        types: [text]
         args: []  # no auto-fix; report only
         exclude: ^go\.sum$
