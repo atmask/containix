@@ -5,13 +5,38 @@
 # dependency PR fails `nix flake check` with a hash mismatch. This recomputes the
 # hash and commits it back to the PR branch so the bump self-heals.
 #
-# Security posture: uses `pull_request_target` so the job runs with a writable
-# GITHUB_TOKEN (Dependabot-triggered `pull_request` runs get a read-only token
-# and can't push). It is gated to `dependabot[bot]` — a first-party actor that
-# only bumps versions — and only checks out / builds the PR head to recompute a
-# fixed-output hash. Do NOT broaden the actor gate: `pull_request_target` + write
-# token + checking out untrusted PR code is the classic privilege-escalation
-# footgun. It only touches go.mod/go.sum changes.
+# Security posture: uses `pull_request_target` so the push job can get a
+# writable GITHUB_TOKEN (Dependabot-triggered `pull_request` runs get a
+# read-only token and can't push). `pull_request_target` + write token +
+# untrusted PR code is the classic privilege-escalation footgun, so:
+#
+# - Gated to PRs that Dependabot both opened and triggered, from a branch in
+#   this repo. Checking `github.actor` alone is not enough: a human can make
+#   Dependabot the actor on a PR it didn't author. Never relax this.
+# - Split into two jobs, both carrying the gate. `compute-hash` has a
+#   read-only token and no persisted credentials, and outputs only a hash.
+#   `push-fixup` holds the write token but never builds or runs PR code: it
+#   validates the hash format, edits one line with sed, commits and pushes.
+# - `compute-hash` only builds the `goModules` fixed-output derivation (the
+#   `go mod vendor` step), not the package itself, so no dependency code is
+#   compiled or executed here. The full build and tests run in CI.
+# - Never add caching (actions/cache, magic-nix-cache, ...) to this workflow:
+#   `pull_request_target` cache writes are scoped to the base branch, so PR
+#   code could poison caches that `main` builds restore.
+# - Everything is pinned to the PR head SHA, not the branch name, so the code
+#   that is built is the code that was checked. The push is a plain
+#   fast-forward: if the branch moved in the meantime it fails, never clobbers.
+# - PR-controlled strings (the branch name) reach shell only via env vars,
+#   never `${{ }}` interpolation into `run:` scripts.
+#
+# Pushes made with GITHUB_TOKEN don't trigger `pull_request` workflows, so the
+# fixup commit would otherwise never get CI. `push-fixup` dispatches ci.yml on
+# the PR branch (workflow_dispatch is exempt from that rule); its checks land
+# on the fixup commit and show up on the PR.
+#
+# Dependabot won't rebase or add to a PR once someone else has committed to
+# it, so after the fixup a grouped PR stops picking up new bumps. To refresh
+# one, comment `@dependabot recreate`; that drops the fixup and re-runs this.
 name: dependabot vendorHash
 
 on:
@@ -28,20 +53,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  fix-vendor-hash:
+  compute-hash:
     # First-party Dependabot PRs only. Never relax this.
-    if: ${{ github.actor == 'dependabot[bot]' }}
+    if: >-
+      github.actor == 'dependabot[bot]' &&
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
     permissions:
-      contents: write # push the vendorHash fixup back to the PR branch
+      contents: read
+    outputs:
+      hash: ${{ steps.rehash.outputs.hash }}
     steps:
       - name: Checkout PR head
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          # Dependabot branches live in this repo, so head.repo == base repo.
-          ref: ${{ github.event.pull_request.head.ref }}
-          # Keep the token so we can push the fixup commit.
-          persist-credentials: true
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
 
       - name: Install Nix
         uses: cachix/install-nix-action@8aa03977d8d733052d78f4e008a241fd1dbf36b3 # v31.10.6
@@ -55,9 +83,9 @@ jobs:
           # 1. Force a mismatch so Nix prints the correct hash.
           sed -i -E "s|vendorHash = \"sha256-[^\"]*\";|vendorHash = \"${FAKE}\";|" flake.nix
 
-          # 2. Build; capture the "got:" hash from the mismatch error.
+          # 2. Vendor the modules; capture the "got:" hash from the mismatch error.
           set +e
-          build_out="$(nix build .#default --no-link 2>&1)"
+          build_out="$(nix build .#default.goModules --no-link 2>&1)"
           set -e
           got="$(printf '%s\n' "$build_out" \
             | grep -oE 'got:[[:space:]]+sha256-[A-Za-z0-9+/=]+' \
@@ -66,29 +94,72 @@ jobs:
           if [ -z "${got}" ]; then
             echo "::notice::No hash mismatch found — vendorHash may already be correct, or the build failed for another reason."
             printf '%s\n' "$build_out" | tail -40
-            # Restore the original file so we don't commit the fake hash.
-            git checkout -- flake.nix
-            echo "changed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          # 3. Write the real hash and confirm the build now succeeds.
+          # 3. Write the real hash and confirm the vendor step now succeeds.
           sed -i -E "s|vendorHash = \"sha256-[^\"]*\";|vendorHash = \"${got}\";|" flake.nix
           echo "New vendorHash: ${got}"
-          nix build .#default --no-link
+          nix build .#default.goModules --no-link
 
-          if git diff --quiet flake.nix; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=true" >> "$GITHUB_OUTPUT"
+          if ! git diff --quiet flake.nix; then
+            echo "hash=${got}" >> "$GITHUB_OUTPUT"
           fi
 
+  push-fixup:
+    needs: compute-hash
+    # Repeat the gate: don't rely on `needs` alone to keep this job safe.
+    if: >-
+      github.actor == 'dependabot[bot]' &&
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      needs.compute-hash.outputs.hash != ''
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write # push the vendorHash fixup back to the PR branch
+      actions: write # dispatch CI on the fixup commit
+    env:
+      NEW_HASH: ${{ needs.compute-hash.outputs.hash }}
+      HEAD_REF: ${{ github.event.pull_request.head.ref }}
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          # Keep the token so we can push. Safe here: this job never runs PR code.
+          persist-credentials: true
+
       - name: Commit and push fixup
-        if: ${{ steps.rehash.outputs.changed == 'true' }}
         run: |
           set -euo pipefail
+          # An SRI sha256 is exactly 44 base64 chars ending in '='.
+          if ! [[ "${NEW_HASH}" =~ ^sha256-[A-Za-z0-9+/]{43}=$ ]]; then
+            echo "::error::Refusing malformed hash from compute-hash: ${NEW_HASH}"
+            exit 1
+          fi
+          if [ "$(grep -c 'vendorHash = "sha256-' flake.nix)" != 1 ]; then
+            echo "::error::Expected exactly one vendorHash line in flake.nix"
+            exit 1
+          fi
+          sed -i -E "s|vendorHash = \"sha256-[^\"]*\";|vendorHash = \"${NEW_HASH}\";|" flake.nix
+          git diff --exit-code --stat -- . ':!flake.nix'
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add flake.nix
           git commit -m "chore(nix): update vendorHash for dependency bump"
-          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
+          git push origin "HEAD:refs/heads/${HEAD_REF}"
+
+      - name: Run CI on the fixup commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # `--ref` runs the branch tip, so only dispatch if that's still our
+          # commit. If the branch moved, the new push gets its own runs.
+          sha="$(git rev-parse HEAD)"
+          tip="$(git ls-remote origin "refs/heads/${HEAD_REF}" | cut -f1)"
+          if [ "${tip}" != "${sha}" ]; then
+            echo "::notice::Branch moved past ${sha}; not dispatching CI."
+            exit 0
+          fi
+          gh workflow run ci.yml --repo "${GITHUB_REPOSITORY}" --ref "${HEAD_REF}"

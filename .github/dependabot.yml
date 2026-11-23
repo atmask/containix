@@ -1,0 +1,36 @@
+# Dependabot version updates.
+#
+# - Go modules are grouped into a single weekly PR. Every Go bump rewrites the
+#   same `vendorHash` line in flake.nix, so separate PRs conflict with each
+#   other after the first one merges.
+# - GitHub Actions are SHA-pinned in our workflows (see ci.yml). Dependabot
+#   bumps the SHA and the `# vX` comment together, so pins don't go stale.
+# - `cooldown` waits a few days after a release before proposing it, so a
+#   compromised or yanked release has time to be caught upstream first.
+#   Security updates ignore cooldown and still open immediately; they're
+#   grouped separately for the same vendorHash-conflict reason.
+
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      go-modules:
+        patterns: ["*"]
+      go-security:
+        applies-to: security-updates
+        patterns: ["*"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      github-actions:
+        patterns: ["*"]

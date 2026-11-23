@@ -10,6 +10,8 @@
 #   later steps that don't need it.
 # - Concurrency cancels in-progress runs on the same ref to save compute
 #   and surface the latest result quickly.
+# - `workflow_dispatch` lets dependabot-vendor-hash.yml run CI on its fixup
+#   commit; pushes made with GITHUB_TOKEN don't trigger `pull_request`.
 
 name: CI
 
@@ -17,6 +19,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
