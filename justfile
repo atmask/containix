@@ -27,5 +27,10 @@ test: install pull
     --label containix.dev/entrypoint="bin/hello" \
     docker.io/library/alpine:latest containix-smoke-test
 
+# End-to-end checks (flake run, passthrough, bad flake, run/exec/kill/delete)
+# against the installed shim. Same script the CI e2e job runs.
+e2e: install pull
+  sudo env "PATH=$PATH" scripts/e2e.sh
+
 logs:
   sudo journalctl -u containerd -f | grep containix
