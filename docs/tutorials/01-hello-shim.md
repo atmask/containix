@@ -112,7 +112,7 @@ import (
 )
 
 func main() {
-	shim.Run(context.Background(), manager.NewShimManager("io.containerd.containix.v1"))
+	shim.RunShim(context.Background(), manager.NewShimManager("io.containerd.containix.v1"))
 }
 ```
 
@@ -120,7 +120,7 @@ Key points:
 
 - **`shim.Run` vs `shim.RunShim`.** Same call shape, signature is `(ctx, Shim, opts...)`. The function was renamed in containerd v2.3 — `Run` is the current name in v2.2 and earlier, `RunShim` is the v2.3+ name with `Run` deprecated as an alias. Use whichever your target containerd's library exports. If you see `undefined: shim.RunShim` at build time, you're on v2.2 and need `shim.Run`. If you see `shim.Run is deprecated, use RunShim`, you're on v2.3+.
 - **`manager.NewShimManager` from the upstream runc shim** handles the bootstrap layer (`Shim` interface). Pass your runtime ID; the manager handles everything else (process spawning, socket plumbing, signal handling).
-- The blank import `_ "containix.dev/pkg/shimservice"` triggers the package's `init()` function, which registers our task plugin in containerd's plugin registry. `shim.Run` looks the plugin up by ID at runtime.
+- The blank import `_ "containix.dev/pkg/shimservice"` triggers the package's `init()` function, which registers our task plugin in containerd's plugin registry. `shim.RunShim` looks the plugin up by ID at runtime.
 
 ## Step 3: Register the task plugin
 
