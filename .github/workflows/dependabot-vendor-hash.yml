@@ -89,7 +89,7 @@ jobs:
           set -e
           got="$(printf '%s\n' "$build_out" \
             | grep -oE 'got:[[:space:]]+sha256-[A-Za-z0-9+/=]+' \
-            | grep -oE 'sha256-[A-Za-z0-9+/=]+' | head -1)"
+            | grep -oE 'sha256-[A-Za-z0-9+/=]+' | head -1 || true)"
 
           if [ -z "${got}" ]; then
             echo "::notice::No hash mismatch found — vendorHash may already be correct, or the build failed for another reason."

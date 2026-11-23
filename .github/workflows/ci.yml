@@ -20,6 +20,10 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  # Weekly run so newly published vulnerabilities surface via govulncheck
+  # even when nothing is merged.
+  schedule:
+    - cron: "17 9 * * 1"
 
 permissions:
   contents: read
@@ -61,6 +65,23 @@ jobs:
 
       - name: Run tests
         run: nix develop -c go test -race ./...
+
+  govulncheck:
+    name: govulncheck
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@8aa03977d8d733052d78f4e008a241fd1dbf36b3 # v31.10.6
+
+      # Reports only vulnerabilities in code the shim actually calls, including
+      # the Go standard library from the pinned toolchain.
+      - name: Scan for known vulnerabilities
+        run: nix develop -c govulncheck ./...
 
   pre-commit:
     name: pre-commit hooks
