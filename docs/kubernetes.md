@@ -39,8 +39,9 @@ apply` of the RuntimeClass alone does nothing. Prep the nodes first.
 
 ## Per-node prerequisites
 
-- **containerd** as the node's runtime (default on EKS/GKE and most managed k8s;
-  bundled in k3s).
+- **containerd 2.3+** as the node's runtime (default on EKS/GKE and most managed k8s;
+  bundled in k3s). Check with `containerd --version`; 2.2 daemons fail with
+  `unsupported protocol`.
 - **Nix daemon** running on the node.
 - The **containix shim** on containerd's `PATH` + the runtime registered.
 - A **binary cache** (cache.nixos.org, Cachix, Attic, …) for tolerable cold

@@ -73,7 +73,7 @@ need a different binary — see below.
 
 ## Node requirements
 
-- containerd (default on EKS, GKE, most managed k8s; bundled in k3s).
+- containerd **2.3 or newer** (default on EKS, GKE, most managed k8s; bundled in k3s). The shim is built against the containerd 2.4 library, and 2.2 daemons reject its bootstrap response with `unsupported protocol`.
 - Nix daemon running on the node.
 - Access to a binary cache (Cachix, Attic, or self-hosted) for cold-start performance.
 - A reachable OCI stub image (CRI requires `image:` even though it isn't used).
