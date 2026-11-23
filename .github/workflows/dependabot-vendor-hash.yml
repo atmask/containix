@@ -66,13 +66,13 @@ jobs:
       hash: ${{ steps.rehash.outputs.hash }}
     steps:
       - name: Checkout PR head
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
 
       - name: Install Nix
-        uses: cachix/install-nix-action@8aa03977d8d733052d78f4e008a241fd1dbf36b3 # v31.10.6
+        uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31.11.5
 
       - name: Recompute vendorHash
         id: rehash
@@ -123,7 +123,7 @@ jobs:
       HEAD_REF: ${{ github.event.pull_request.head.ref }}
     steps:
       - name: Checkout PR head
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           # Keep the token so we can push. Safe here: this job never runs PR code.
