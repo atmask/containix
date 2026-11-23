@@ -10,20 +10,19 @@
     let
       perSystem = flake-utils.lib.eachSystem [
         "aarch64-darwin"
-        "x86_64-darwin"
         "aarch64-linux"
         "x86_64-linux"
       ]
         (system:
           let
             pkgs = nixpkgs.legacyPackages.${system};
-            isLinux = pkgs.stdenv.isLinux;
+            isLinux = pkgs.stdenv.hostPlatform.isLinux;
 
-            containixPkg = pkgs.buildGoModule {
+            containixPkg = pkgs.buildGo126Module {
               pname = "containerd-shim-containix-v1";
               version = "0.1.0";
               src = ./.;
-              vendorHash = "sha256-WFoF47S/FmejZGsOVkVuZCsPya0szX2m0nqxRtRsQqU=";
+              vendorHash = "sha256-wceTXAPeiHD4ydhDa2Wy+tFmTqpan7X+U/Ix4kuN8+o=";
               subPackages = [ "cmd/containerd-shim-containix-v1" ];
               env.CGO_ENABLED = "0";
               meta = with pkgs.lib; {
@@ -49,7 +48,7 @@
 
               packages = with pkgs; [
                 # Toolchain
-                go # needs >= 1.26.3 for containerd v2.3.x
+                go_1_26 # needs >= 1.26.3 for containerd v2.3.x; 1.26.11+ for stdlib CVE fixes
                 just # task runner used by ./justfile
                 git
 
@@ -59,6 +58,7 @@
                 gofumpt # stricter gofmt
                 go-tools # staticcheck and friends
                 golangci-lint
+                govulncheck # known-vulnerability scan (also run in CI)
 
                 # Pre-commit hook framework + the tools the configured hooks invoke
                 pre-commit

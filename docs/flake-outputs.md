@@ -105,7 +105,7 @@ You want to add a `packages.default` next to `devShells.default`, but only for L
 Inside the `let pkgs = nixpkgs.legacyPackages.${system};` block, add:
 
 ```nix
-isLinux = pkgs.stdenv.isLinux;
+isLinux = pkgs.stdenv.hostPlatform.isLinux;
 
 containixPkg = pkgs.buildGoModule {
   pname = "containerd-shim-containix-v1";
