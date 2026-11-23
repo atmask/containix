@@ -66,6 +66,93 @@ jobs:
       - name: Run tests
         run: nix develop -c go test -race ./...
 
+  # Runs scripts/e2e.sh against a real containerd (pinned release tarball,
+  # checksum-verified) with the shim from `nix build`. Covers the oldest
+  # supported containerd line (2.3) and the one the shim is built against.
+  # Dependabot doesn't track these pins: bump them by hand alongside
+  # containerd module updates.
+  e2e:
+    name: e2e containerd ${{ matrix.containerd }} linux/${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - containerd: 2.3.7
+            arch: amd64
+            runner: ubuntu-24.04
+            sha256: 09a1b669ac6d21e7e24c3c33a9805b48987ba5845e8d88f039c47013a0c0025c
+          - containerd: 2.3.7
+            arch: arm64
+            runner: ubuntu-24.04-arm
+            sha256: e08530c6c8a23c612606da5d2832aed9bed8fc7f8c1b41df0f148a701b931d69
+          - containerd: 2.4.2
+            arch: amd64
+            runner: ubuntu-24.04
+            sha256: 35880c1dd4627e8ce56526bfabb39c144e83458ffdb197ce6f05d17d94d7d91e
+          - containerd: 2.4.2
+            arch: arm64
+            runner: ubuntu-24.04-arm
+            sha256: fdfab81a86192ddb8165d72f116ec985485c9e12505e323c4f4579c48020f276
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31.11.5
+
+      - name: Build shim and runc
+        run: |
+          nix build .#default -o result-shim
+          nix build --inputs-from . nixpkgs#runc -o result-runc
+
+      - name: Install containerd ${{ matrix.containerd }}
+        env:
+          VERSION: ${{ matrix.containerd }}
+          ARCH: ${{ matrix.arch }}
+          SHA256: ${{ matrix.sha256 }}
+        run: |
+          tarball="containerd-${VERSION}-linux-${ARCH}.tar.gz"
+          curl -fsSLo "${RUNNER_TEMP}/${tarball}" \
+            "https://github.com/containerd/containerd/releases/download/v${VERSION}/${tarball}"
+          echo "${SHA256}  ${RUNNER_TEMP}/${tarball}" | sha256sum -c -
+          mkdir -p "${RUNNER_TEMP}/containerd"
+          tar -xzf "${RUNNER_TEMP}/${tarball}" -C "${RUNNER_TEMP}/containerd"
+
+      # Separate root/state/socket so this doesn't collide with the runner's
+      # own containerd (Docker).
+      - name: Start containerd
+        run: |
+          cat > "${RUNNER_TEMP}/containerd.toml" <<'TOML'
+          version = 3
+          root = "/var/lib/containerd-e2e"
+          state = "/run/containerd-e2e"
+          [grpc]
+            address = "/run/containerd-e2e/containerd.sock"
+          TOML
+          path="$PWD/result-shim/bin:$PWD/result-runc/bin:${RUNNER_TEMP}/containerd/bin:$(dirname "$(command -v nix)"):$PATH"
+          echo "E2E_PATH=${path}" >> "$GITHUB_ENV"
+          # The log lives in RUNNER_TEMP, owned by the runner user, so the
+          # redirect deliberately runs without sudo.
+          # shellcheck disable=SC2024
+          sudo env "PATH=${path}" nohup containerd --config "${RUNNER_TEMP}/containerd.toml" \
+            > "${RUNNER_TEMP}/containerd.log" 2>&1 &
+          for _ in $(seq 1 30); do
+            sudo env "PATH=${path}" CONTAINERD_ADDRESS=/run/containerd-e2e/containerd.sock \
+              ctr version >/dev/null 2>&1 && exit 0
+            sleep 1
+          done
+          echo "containerd did not start"; cat "${RUNNER_TEMP}/containerd.log"; exit 1
+
+      - name: Run e2e checks
+        run: sudo env "PATH=${E2E_PATH}" CONTAINERD_ADDRESS=/run/containerd-e2e/containerd.sock scripts/e2e.sh
+
+      - name: containerd log
+        if: failure()
+        run: grep -iE "containix|shim|error|level=(error|warn)" "${RUNNER_TEMP}/containerd.log" | tail -100
+
   govulncheck:
     name: govulncheck
     runs-on: ubuntu-24.04
