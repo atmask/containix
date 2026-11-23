@@ -48,10 +48,13 @@ jobs:
           nix build .#stub-image-arm64 -o result-arm64
 
       - name: Login to ghcr.io
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
         run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" \
-            | nix run nixpkgs#crane -- auth login ghcr.io \
-                -u ${{ github.actor }} --password-stdin
+          printf '%s' "${GHCR_TOKEN}" \
+            | nix run --inputs-from . nixpkgs#crane -- auth login ghcr.io \
+                -u "${GHCR_USER}" --password-stdin
 
       - name: Push per-arch images
         env:
@@ -63,8 +66,8 @@ jobs:
           # "archive/tar: invalid tar header" on the gzip magic bytes.
           gunzip -c result-amd64 > image-amd64.tar
           gunzip -c result-arm64 > image-arm64.tar
-          nix run nixpkgs#crane -- push image-amd64.tar "${BASE}:${VERSION}-amd64"
-          nix run nixpkgs#crane -- push image-arm64.tar "${BASE}:${VERSION}-arm64"
+          nix run --inputs-from . nixpkgs#crane -- push image-amd64.tar "${BASE}:${VERSION}-amd64"
+          nix run --inputs-from . nixpkgs#crane -- push image-arm64.tar "${BASE}:${VERSION}-arm64"
 
       - name: Combine into multi-arch manifest list
         env:
@@ -72,7 +75,7 @@ jobs:
           VERSION: ${{ steps.tag.outputs.version }}
         run: |
           # Tag the full semver (e.g. :1.0.0).
-          nix run nixpkgs#crane -- index append \
+          nix run --inputs-from . nixpkgs#crane -- index append \
             -m "${BASE}:${VERSION}-amd64" \
             -m "${BASE}:${VERSION}-arm64" \
             -t "${BASE}:${VERSION}"
@@ -80,7 +83,7 @@ jobs:
           # Also tag the major (e.g. :1) — consumers pin to this in pod
           # specs so they get the latest patch within a major automatically.
           MAJOR="${VERSION%%.*}"
-          nix run nixpkgs#crane -- index append \
+          nix run --inputs-from . nixpkgs#crane -- index append \
             -m "${BASE}:${VERSION}-amd64" \
             -m "${BASE}:${VERSION}-arm64" \
             -t "${BASE}:${MAJOR}"
@@ -88,7 +91,7 @@ jobs:
           # And :latest — so an untagged `image: ghcr.io/atmask/containix-empty`
           # still resolves (CRI defaults to :latest). Docs pin :<version>; this is
           # just a convenience alias. Additive — the versioned tags above stand.
-          nix run nixpkgs#crane -- index append \
+          nix run --inputs-from . nixpkgs#crane -- index append \
             -m "${BASE}:${VERSION}-amd64" \
             -m "${BASE}:${VERSION}-arm64" \
             -t "${BASE}:latest"
