@@ -22,7 +22,7 @@
               pname = "containerd-shim-containix-v1";
               version = "0.1.0";
               src = ./.;
-              vendorHash = "sha256-bZRaY7VlJrtyqJmRvKYD6IsokVfTdVUwFOkhdtkM2vY=";
+              vendorHash = "sha256-nSf+jUefXHjTEDMMw6hMVKGP4fHYnRzGhObybI55DIQ=";
               subPackages = [ "cmd/containerd-shim-containix-v1" ];
               env.CGO_ENABLED = "0";
               meta = with pkgs.lib; {
