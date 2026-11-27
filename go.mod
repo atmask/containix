@@ -6,7 +6,7 @@ require (
 	github.com/containerd/containerd/api v1.12.0
 	github.com/containerd/containerd/v2 v2.4.2
 	github.com/containerd/plugin v1.1.0
-	github.com/containerd/ttrpc v1.2.9
+	github.com/containerd/ttrpc v1.2.10
 	github.com/opencontainers/runtime-spec v1.3.0
 	google.golang.org/protobuf v1.36.12
 )
